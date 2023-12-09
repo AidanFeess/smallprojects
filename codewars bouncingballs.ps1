@@ -2,7 +2,7 @@ function bouncing-ball{
     [OutputType([int])]
     Param ([double]$h, [double]$bounce, [double]$window)
 
-    $ttl = 0
+    $ttl = 0 # total
 
     if($h -gt 0 -And $bounce -gt 0 -And $bounce -lt 1 -And $window -lt $h){
         while ($h -gt $window) {
