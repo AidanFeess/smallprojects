@@ -19,15 +19,16 @@ def accurate_print():
 # point. It takes a numerical argument that represents x, and returns
 # the result of f(x).
 def evaluate_math_function(x):
-    return 3*(x**2)-2(x**2)
+    return 3 * (x**3) - 2 * (x**2)
 # A function that calculates an approximation of the integral of f(x)
 # using the riemann sum. It takes three arguments that represent the
 # lower limit, the upper limit, and the n value. It then returns the
 # integral approximation as a result to the calling statement.
-def approximate(a, b):
+def approximate(lower, upper, n):
     ttl = 0
-    for i in range(a, b):
-        ttl += evaluate_math_function(i)
+    for i in range(lower, upper):
+        ttl += evaluate_math_function(n)
+    return ttl
 ########################### MAIN ##################################
 # In the space below, use the functions defined above to solve the
 # problem.
@@ -35,12 +36,12 @@ def approximate(a, b):
 # Print the introductory statements of the program
 print_intro()
 # Prompt the user for both the lower and upper limits
-lower = promptuser("a")
-upper = promptuser("b")
+lower = int(promptuser("a"))
+upper = int(promptuser("b"))
 # Print the statements about n
 accurate_print()
 # Prompt the user for the n value
-nval = promptuser("n")
+nval = int(promptuser("n"))
 # Calculate the integral approximation
-print(f"The integral {approximate()}")
 # Print out the result.
+print(f"The integral over the provided limits is {approximate(lower, upper, nval)}")
