@@ -1,4 +1,5 @@
 import pygame
+import sys
 import math
 
 pygame.init()
@@ -6,9 +7,27 @@ WIDTH, HEIGHT = 400, 400
 DOTWIDTH, DOTHEIGHT = 2, 2
 LINEWIDTH = 3
 
+print("INPUT")
+print("DELETE")
+print("EXIT")
+print("===================")
+
 FUNCTION_LIST = [
+<<<<<<< HEAD
     [lambda x: x**.5, "red"],
+=======
+    [lambda x: eval("1/x"), "red"],
+>>>>>>> 2260b3e5305baa34a4a8a753ae4db6eaab819284
 ]
+
+ALL_ENTERED = False
+while not ALL_ENTERED:
+    match input("Enter a command: "):
+        case "EXIT":
+            sys.exit()
+        case "INPUT":
+             input("EXPRESSION")
+
 
 SCALELINEWIDTH = 2
 XBASE, YBASE = 5, 5
