@@ -7,7 +7,7 @@ DOTWIDTH, DOTHEIGHT = 2, 2
 LINEWIDTH = 3
 
 FUNCTION_LIST = [
-    [lambda x: math.sin(x), "red"],
+    [lambda x: x**.5, "red"],
 ]
 
 SCALELINEWIDTH = 2
