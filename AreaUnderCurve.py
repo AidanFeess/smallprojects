@@ -13,10 +13,10 @@ print("EXIT")
 print("===================")
 
 FUNCTION_LIST = [
-    [lambda x: eval("1/x"), "red"],
+    [lambda x: eval("x**2"), "red"],
 ]
 
-ALL_ENTERED = False
+ALL_ENTERED = True
 while not ALL_ENTERED:
     match input("Enter a command: "):
         case "EXIT":
