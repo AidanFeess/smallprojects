@@ -13,7 +13,15 @@ print("EXIT")
 print("===================")
 
 FUNCTION_LIST = [
+<<<<<<< HEAD
     [lambda x: eval("x**2"), "red"],
+=======
+<<<<<<< HEAD
+    [lambda x: x**.5, "red"],
+=======
+    [lambda x: eval("1/x"), "red"],
+>>>>>>> 2260b3e5305baa34a4a8a753ae4db6eaab819284
+>>>>>>> 0e37d78e11f63b40b9a3326fe78f84fd69329039
 ]
 
 ALL_ENTERED = True
