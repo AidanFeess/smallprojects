@@ -1,2 +1,0 @@
-leng = float(input("Room Length: ")); widt = float(input("Room Width: ")); cost = float(input("Cost per Sq. Foot: "))
-print(f"Square Feet: {leng*widt}\nFlooring: {(leng*widt)*cost}\nTax: {((leng*widt)*cost)*.07}\nTotal: {(leng*widt)*cost + ((leng*widt)*cost)*.07}")
