@@ -4,7 +4,6 @@ class Animal:
         self.alive = alive
         self.appetite = appetite
 
-
 class Dog(Animal):
     def __init__(self, dog_name, dog_breed, alive, is_funny, likes_potatoes):
         self.name = dog_name
