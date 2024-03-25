@@ -34,10 +34,8 @@ def GetInfo(Question: str):
 def CreateList(Min: int, Max: int, StepSize: int, PopList: list):
     # we create a dictionary mapping the step to an integer so it can be accessed later
     RetList = {Step:0 for Step in range(Min+StepSize, Max+StepSize, StepSize)}
-    print(RetList)
     Step = StepSize
     while Step <= Max:
-        print(Step)
         for line in PopList:
             if int(line) < Step and int(line) >= Step - StepSize:
                 RetList[Step] += 1
