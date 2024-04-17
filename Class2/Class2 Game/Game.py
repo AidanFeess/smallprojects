@@ -1,7 +1,6 @@
 from DeathFunc import death
 from random import choice
 from time import sleep
-import os
 import random
 import numpy
 ###################################################################### PLAYER VARIABLES
