@@ -1,6 +1,7 @@
 from DeathFunc import death
 from random import choice
 from time import sleep
+import os
 import random
 import numpy
 ###################################################################### PLAYER VARIABLES
@@ -9,12 +10,7 @@ EquippedWeapon = None
 Inventory = []
 
 MovedRooms = False
-#DebugMap = [["X", "0", "0"],
-#            ["0", "0", "0"],
-#            ["0", "0", "0"]]
-
 WonGame = False
-
 Score = 0
 
 MaxHealth = 100
@@ -25,6 +21,9 @@ MaxHunger = 10
 
 MaxThirst = 10
 Thirst = 10
+
+
+
 # Amount of hunger/thirst lost per turn
 HungerLoss = -1
 ThirstLoss = -2
@@ -158,15 +157,14 @@ class Enemy(Character):
 
 class Room:
 # the constructor
-    def __init__(self, name : str, isExit : bool, Position : tuple):
+    def __init__(self, name : str, Position : tuple, IsStore : bool):
         self.name = name
-        self.isExit = isExit
         self.Position = Position
 
         self.items = []
         self.Enemies = []
+        self.IsStore = IsStore
 
-    
     # getters and setters for the instance variables
     @property
     def name(self):
@@ -174,12 +172,6 @@ class Room:
     @name.setter
     def name(self, value):
         self._name = value
-    @property
-    def isExit(self):
-        return self._isExit
-    @isExit.setter
-    def isExit(self, value):
-        self._isExit = value
     @property
     def items(self):
         return self._items
@@ -218,10 +210,16 @@ class Room:
     def delEnemy(self, enemy):
         self._Enemies.remove(enemy)
 
+    def sellItemTo(self, item):
+        if self.IsStore:
+            return item.worth
+
     # returns a string description of the room
     def __str__(self):
         # first, the room name
         PlayerStatus = f"You are in {self.name}.\n"
+        if self.IsStore:
+            PlayerStatus += "It is a store!\n"
         # next, the items in the room
         repeatObjects = {}
         for item in self.items:
@@ -231,8 +229,16 @@ class Room:
                 repeatObjects[item.name] += 1
         # Correctly format the objects in the room so that it appears in a more readable format
         if len(repeatObjects) > 0:
-            PlayerStatus += "You see: "
-            PlayerStatus += "".join([f"{repeatObjects[x]} {x}\n" if repeatObjects[x] > 1 else f"a {x}\n" for x in repeatObjects])
+            PlayerStatus += "There is: \n" if self.IsStore else "You see: \n"
+            if self.IsStore:
+                for item in self.items:
+                    if type(item).__name__ == "Food":
+                        PlayerStatus += f"a {item.name}, Healing: {item.healing}, Hunger: {item.hunger}, Thirst: {item.thirst}, Cost: {item.worth}\n"
+                    elif type(item).__name__ == "Weapon":
+                        PlayerStatus += f"a {item.name}, Damage: {item.damage}, Cost: {item.worth}\n"
+            elif not self.IsStore:
+                PlayerStatus += "".join([f"{repeatObjects[x]} {x}\n" if repeatObjects[x] > 1 else f"a {x}\n" for x in repeatObjects])
+
         # finally, the enemies in the room
         if len(self.Enemies) > 0:
             PlayerStatus += f"\nYou're about to be attacked by: "
@@ -276,7 +282,7 @@ WeaponNames = [
     "Trident",
     "Javelin",
     "Battleaxe",
-    "War scythe",
+    "War-scythe",
     "Sling",
     "Nuclear-Missile-Launcher",
     "AK-47",
@@ -346,13 +352,13 @@ EnemyNames = [
     "Beholder",
     "Mimic",
     "Jeff",
-    "A particularly evil ant",
-    "A gigantic cow that wants to turn you into food",
-    "A tree with evil intentions",
-    "3 Bushes (of evil)"
+    "A_particularly_evil_ant",
+    "A_gigantic_cow_that_wants_to_turn_you_into_food",
+    "A_tree_with_evil_intentions",
+    "3-Bushes-(of-evil)"
 ]
 
-# List of items
+# Lists of items
 OtherItems = [
     Item(choice(OtherNames), "An interesting object!", 0, False) for x in range(15)
     ]
@@ -362,6 +368,13 @@ WeaponItems = [
 FoodItems = [
     Food(choice(FoodNames), "A hearty meal!", random.randint(1, 100), random.randint(-5, 25), random.randint(1, 4), random.randint(1, 6)) for x in range(30)
     ]
+
+# List of legendary weapons
+LegendaryWeapons = [
+    Weapon("[L]Nik'sLaptop", "[LEGENDARY] Laptop of a CS teacher.", 1337, 655.36),
+    Weapon("[L]Dr.AnkyFigurine", "[LEGENDARY] Figurine of a man pictured in Nethken hall.", 10.24, 42),
+    Weapon("[L]MoldyBread", "[LEGENDARY] Some... moldy bread?", 9999, 9999)
+]
 
 # List of enemies
 EnemyList = [
@@ -374,38 +387,72 @@ def createRooms():
     global currentRoom
     global MapSize 
     global Rooms
+    global DebugMap
+
+    # Ensure atleast one store is generated
+    StoreGenerated = False
+
+    DebugMap = []
 
     MapSize = (random.randint(3, 6), random.randint(3, 6))
     Rooms = []
     # Create a room for each X and Y
     for y in range(MapSize[1]):
         Row = []
+        DebugRow = []
         for x in range(MapSize[0]):
+            # Don't allow the boss room to be a store
+            IsStore = True if random.randint(1, 25) == 1 and not y==MapSize[1]-1 and not x==MapSize[0]-1 else False
+            # Ensure atleast one store is generated
+            if y >= MapSize[0]-2 and not StoreGenerated and not y==MapSize[1]-1 and not x==MapSize[0]-1:
+                IsStore = True
+                StoreGenerated = True
+
             RoomName = "a "
             RoomName += f"{choice(RoomDescriptors)} room with a {choice(RoomCeilingHeight)} ceiling. It appears to be in a{choice(RoomMaterialState)} condition"
-            NewRoom = Room(RoomName, False, (x, y))
-            # Add a random number of random foods
-            for _ in range(random.randint(1, 4)):
-                NewRoom.addItem(choice(FoodItems))
-            # Add a random number of random weapons
-            for _ in range(random.randint(0, 1)):
-                NewRoom.addItem(choice(WeaponItems))
-            # Add a random number of objects
-            for _ in range(random.randint(2, 6)):
-                NewRoom.addItem(choice(OtherItems))
+            NewRoom = Room(RoomName, (x, y), IsStore)
 
-            for _ in range(random.randint(0, 2)):
-                NewRoom.addEnemy(choice(EnemyList))
+            if not IsStore:
+                # Add a random number of random foods
+                for _ in range(random.randint(1, 4)):
+                    NewRoom.addItem(choice(FoodItems))
+                # Add a random number of random weapons
+                for _ in range(random.randint(0, 1)):
+                    NewRoom.addItem(choice(WeaponItems))
+                # Add a random number of ramndom objects
+                for _ in range(random.randint(2, 6)):
+                    NewRoom.addItem(choice(OtherItems))
+                # Add a random number of random enemies
+                for _ in range(random.randint(0, 2)):
+                    NewRoom.addEnemy(choice(EnemyList))
+                # Showing on the map that its a room
+                DebugRow.append("0")
+            elif IsStore:
+                # Add atleast 2 weapons and 4 food items to the store
+                for Weapon in range(random.randint(2, 4)):
+                    NewRoom.addItem(choice(WeaponItems))
+        
+                for Food in range(random.randint(4, 8)):
+                    NewRoom.addItem(choice(FoodItems))
+
+                ## Add a legendary weapon :)
+                NewRoom.addItem(choice(LegendaryWeapons))
+                # Showing on the map that its a store
+                DebugRow.append("$")
+
             
             Row.append(NewRoom)
+        DebugMap.append(DebugRow)
         Rooms.append(Row)
 
     currentRoom = Rooms[0][0]
+    DebugMap[0][0] = "X"
+    DebugMap[MapSize[1]-1][MapSize[0]-1] = "B"
     # Add the boss to the farthest room
-    Rooms[MapSize[0]-1][MapSize[1]-1].addEnemy(Enemy(name="Boss"+choice(EnemyNames),health=random.randint(150,350), resistances=None,level=5,score_worth=100,attack_power=random.randint(12,37)))
+    Rooms[MapSize[1]-1][MapSize[0]-1].addEnemy(Enemy(name="Boss"+choice(EnemyNames),health=random.randint(150,350), resistances=None,level=5,score_worth=100,attack_power=random.randint(12,37)))
 
 def CalculateScore():
-    return Gold + Score + sum([item.worth for item in Inventory])
+    return int(Gold + Score + sum([item.worth * .7 for item in Inventory]))
 
 def OnDeath():
     death()
@@ -418,6 +465,11 @@ def OnVictory():
 ###################################################################### GAME
 createRooms() # add the rooms to the game
 # play forever (well, at least until the player dies or asks to quit)
+username = input("What's your username? ")
+userCanDebug = False
+if username == "seei":
+    userCanDebug = True
+
 while (True):
     # Set the state back to normal
     MovedRooms = False
@@ -443,7 +495,9 @@ while (True):
     if Thirst == 0:
         Health -= 10
         status += "\nYou are dehydrated, you will lose 10 hp!"
-    if currentRoom == None or Health <= 0:
+    if currentRoom.IsStore:
+        status += f"\n\nCurrent gold: {Gold}"
+    if currentRoom == None or Health <= 0 and not WonGame:
         status = "You are dead."
     elif WonGame:
         status = "You won!"
@@ -453,7 +507,7 @@ while (True):
     print("="*56)
     # if the current room is None (and the player is dead), exit the
     # game
-    if currentRoom == None or Health <= 0:
+    if currentRoom == None or Health <= 0 and not WonGame:
         OnDeath()
         break
     elif WonGame:
@@ -472,6 +526,9 @@ while (True):
         "equip",
         "move",
     ]
+    if currentRoom.IsStore:
+        actions.append("buy")
+        actions.append("sell")
     action_list = "".join([x + '\n' for x in actions])
     action = input(f"What to do? \n{action_list}")
     # set the user's input to lowercase to make it easier to compare
@@ -492,24 +549,29 @@ while (True):
         match verb:
             case "look":
                 response = "I don't see that item."
+                # Go through the list of items and find the matching item, then show its description and if its grabbable or not.
                 for i in range(len(currentRoom.items)):
                     if (noun == currentRoom.items[i].name):
                         response = currentRoom.items[i].description
                         response += " It's grabbable." if currentRoom.items[i].grabbable else " It's not grabbable."
+                        # If an item is food then explain its effects
                         if type(currentRoom.items[i]).__name__ == "Food":
                             print(f"The {currentRoom.items[i].name} will restore {currentRoom.items[i].hunger} hunger and {currentRoom.items[i].thirst} thirst.")
                         break
             case "take":
-                response = "I don't see that item."
-                for item in currentRoom.items:
-                    if noun == item.name and item.grabbable:
-                        Inventory.append(item)
-                        currentRoom.delItem(item)
-                        response = "Item grabbed."
-                        break
-                    elif not item.grabbable:
-                        response = "That item isn't grabbable."
-                        break
+                # Don't allow people to take things for free if its a store
+                response = "You try to steal and the store owner's bodyguard takes all your money."
+                Gold = 0
+                if not currentRoom.IsStore:
+                    response = "I don't see that item."
+                    for item in currentRoom.items:
+                        if noun == item.name and item.grabbable:
+                            Inventory.append(item)
+                            currentRoom.delItem(item)
+                            response = "Item grabbed."
+                            break
+                        elif not item.grabbable:
+                            response = "That item isn't grabbable."
             case "eat":
                 response = "I don't have that item."
                 for item in Inventory:
@@ -537,7 +599,7 @@ while (True):
                     for enemy in currentRoom.Enemies:
                         if noun == enemy.name:
                             response, Score = EquippedWeapon.DealDamage(enemy, Score)
-                            if enemy.health <= 0 and str.find(enemy.name, "Boss"):
+                            if enemy.health <= 0 and str.find(enemy.name, "Boss") != -1:
                                 WonGame = True
                                 print("You won the game!")
                             break
@@ -552,30 +614,59 @@ while (True):
                 response = "Couldn't find a room that direction! Did I say left, right, up, or down?"
                 try:
                     if noun == "right" and currentRoom.Position[0]+1 <= MapSize[0]:
-                        #DebugMap[currentRoom.Position[1]][currentRoom.Position[0]] = "0"
-                        #DebugMap[currentRoom.Position[1]][currentRoom.Position[0]+1] = "X"
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]] = "0"
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]+1] = "X"
                         currentRoom = Rooms[currentRoom.Position[1]][currentRoom.Position[0]+1]
                         response = "Went right!"
                         MovedRooms = True
 
                     elif noun == "left" and currentRoom.Position[0]-1 >= 0:
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]] = "0"
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]-1] = "X"
                         currentRoom = Rooms[currentRoom.Position[1]][currentRoom.Position[0]-1]
                         response = "Went left!"
                         MovedRooms = True
 
                     elif noun == "up" and currentRoom.Position[1]-1 >= 0:
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]] = "0"
+                        DebugMap[currentRoom.Position[1]-1][currentRoom.Position[0]] = "X"
                         currentRoom = Rooms[currentRoom.Position[1]-1][currentRoom.Position[0]]
                         response = "Went up!"
                         MovedRooms = True
 
                     elif noun == "down" and currentRoom.Position[1] <= MapSize[1]:
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]] = "0"
+                        DebugMap[currentRoom.Position[1]+1][currentRoom.Position[0]] = "X"
                         currentRoom = Rooms[currentRoom.Position[1]+1][currentRoom.Position[0]]
                         response = "Went down!"
                         MovedRooms = True
                 except:
                     pass
+            case "buy":
+                response = "I can't buy now."
+                if currentRoom.IsStore:
+                    response = "I don't see that item."
+                    for item in currentRoom.items:
+                        if noun == item.name and item.grabbable and Gold > item.worth:
+                            Inventory.append(item)
+                            currentRoom.delItem(item)
+                            Gold -= item.worth
+                            response = "Item bought."
+                            break
+                        elif not Gold > item.worth:
+                            response = "I'm far too poor for that."
+            case "sell":
+                response = "I can't sell now."
+                if currentRoom.IsStore:
+                    response = "I don't have that item."
+                    for item in Inventory:
+                        if noun == item.name:
+                            Gold += currentRoom.sellItemTo(item)
+                            Inventory.remove(item)
+                            response = "I sold the item."
+                            break
     # Debug menu
-    elif len(words) >= 3:
+    elif len(words) >= 3 and userCanDebug:
         if words[0] == "debug":
             verb = words[1]
             noun = words[2]
@@ -617,20 +708,76 @@ while (True):
                         if enemy.Name == noun:
                             for x in range(amount):
                                 currentRoom.addEnemy(enemy)
+                case "list":
+                    response = "Couldn't find that list"
+                    if noun == "enemies":
+                        print("="*56)
+                        for enemy in EnemyList:
+                            print(f"{enemy.name}, health: {enemy.health}, damage: {enemy.attack_power}")
+                        print("="*56)
+                        response = "Listed enemies."
+                    elif noun == "weapons":
+                        print("="*56)
+                        for weapon in WeaponItems:
+                            print(f"{weapon.name}, damage: {weapon.damage}, worth: {weapon.worth}")
+                        print("="*56)
+                        response = "Listed weapons."
+                case "give":
+                    response = "No such item."
+                    GiveItem = None
+
+                    # Check each list for an item matching the given name
+                    for item in OtherItems:
+                        if item.name == noun:
+                            response = "Gave the item."
+                            GiveItem = item
+                            break
+                    
+                    for item in FoodItems:
+                        if item.name == noun:
+                            response = "Gave the item."
+                            GiveItem = item
+                            break
+
+                    for item in WeaponItems:
+                        if item.name == noun:
+                            response = "Gave the item."
+                            GiveItem = item
+                            break
+
+                    # Place the items as many times as indicated
+                    if GiveItem: 
+                        for x in range(amount):
+                            newitem = GiveItem
+                            Inventory.append(newitem)
                 case "tp":
                     try:
-                        currentRoom = Rooms[noun.split(":")[0]][noun.split(":")[1]]
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]] = "0"
+                        currentRoom = Rooms[int(noun.split(":")[0])][int(noun.split(":")[1])]
+                        DebugMap[currentRoom.Position[1]][currentRoom.Position[0]] = "X"
                         response = "Teleported."
                     except:
                         response = "Failed to teleport."
+                case "map":
+                    for line in DebugMap:
+                        print(line)
+                    response = "Map shown."
+                case "god":
+                    MaxHealth = 999999
+                    Health = 999999
+                    response = "Godmode enabled"
+                case "win":
+                    WonGame = True
+                    response = "Winning game."
+
                         
     # Turn is over here
     print(f"\n{response}\n")
     sleep(1)
-    if MovedRooms or RoundPassed:
+    if MovedRooms or RoundPassed and not WonGame:
         Hunger += HungerLoss if Hunger + HungerLoss >= 0 else 0
         Thirst += ThirstLoss if Thirst + ThirstLoss >= 0 else 0
-    if len(currentRoom.Enemies) > 0 and not MovedRooms and RoundPassed:
+    if len(currentRoom.Enemies) > 0 and not MovedRooms and RoundPassed and not WonGame:
         print("\nThe enemies will now attack!\n")
         for enemy in currentRoom.Enemies:
             sleep(.3)
