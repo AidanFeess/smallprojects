@@ -92,7 +92,7 @@ class Food(Item):
         self._shelfLife = value if value > 0 else None
 
     def __str__(self):
-        return f"{self.name}\t{self.cost:.2f}\t{self.price:.2f}\t|expires in {self.shelfLife} days".ljust(20)
+        return f"{self.name}\t{self.cost:.2f}\t{self.price:.2f}\t|expires in {self.shelfLife} days"
 
 #####################################################################
 # A Shoe is a Clothing. It only receives cost, price and size as
