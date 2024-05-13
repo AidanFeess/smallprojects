@@ -24,10 +24,9 @@ class MainGUI(Frame):
         # then reboot
         # the display
         # right-align text in the display; and set its background to
-        # white, its height to 2 characters, and its font to 50
+        # white, its height to 1 characters, and its font to 45
         # point TexGyreAdventor
-        self.display = Label(self, text="", anchor=E, bg="white",
-        height=1, font=("TexGyreAdventor", 45))
+        self.display = Label(self, text="", anchor=E, bg="white", height=1, font=("TexGyreAdventor", 45))
         # put it in the top row, spanning across all four columns;
         # and expand it on all four sides
         self.display.grid(row=0, column=0, columnspan=4,
@@ -41,7 +40,7 @@ class MainGUI(Frame):
         # = = ** %
         # configure the rows and columns of the Frame to adjust to
         # the window
-        # there are 6 rows (0 through 5)
+        # there are 6 rows (1 through 6)
         for row in range(6):
             Grid.rowconfigure(self, row, weight=1)
         # there are 4 columns (0 through 3)
