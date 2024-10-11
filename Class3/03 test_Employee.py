@@ -6,7 +6,7 @@
 #####################################################################
 
 import unittest         # import the unittest library
-from Program3 import *  # import all classes from the Employee.py file
+from Assignment3 import *  # import all classes from the Employee.py file
 
 # A class to test the Employee class.
 class TestEmployee(unittest.TestCase):

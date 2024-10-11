@@ -4,17 +4,16 @@ import base64
 import os
 
 from Entities import *
-from Constants import *
+from GameConstants import *
 from PlayerData import *
 
 # Initialize pygame
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption('Spider Shooter')
+pygame.display.set_caption(GAME_NAME)
 
 # Game variables
 player_speed = 5
-spider_speed = 4
 projectile_speed = 7
 
 reload_time = 500  # Milliseconds between each shot
@@ -23,10 +22,6 @@ lives = 3
 
 current_score = 0
 p_data = PlayerData()
-
-# Resize images to desired size
-player_width, player_height = 50, 50
-spider_width, spider_height = 40, 40
 
 # Fonts
 font = pygame.font.SysFont(None, 36)
@@ -49,9 +44,8 @@ def draw_text(text, font, color, surface, x, y):
 
 def reset_game():
     """Resets the game state"""
-    global player, spider, projectiles, current_score, lives, game_over
+    global player, projectiles, current_score, lives, game_over
     player = spawn_entity(Player, (SCREEN_WIDTH // 2 - player_width // 2), (SCREEN_HEIGHT - player_height - 10))
-    spider = spawn_entity(Spider, 0, random.randint(10, SCREEN_HEIGHT // 2))
     projectiles = []
     current_score = 0
     lives = 3
@@ -63,7 +57,7 @@ def start_screen():
     exit_button_rect = pygame.Rect(SCREEN_WIDTH // 2 - button_width // 2, SCREEN_HEIGHT // 2 + 100, button_width, button_height)
 
     screen.fill(BLACK)
-    draw_text('Spider Shooter', large_font, RED, screen, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 150)
+    draw_text(f'{GAME_NAME}', large_font, RED, screen, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 150)
     draw_text(f'High Score: {p_data.get_data("high_score")}', font, WHITE, screen, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50)
 
     pygame.draw.rect(screen, GREEN, start_button_rect)
@@ -97,8 +91,7 @@ def spawn_entity(entity_class, x, y):
 start_screen()
 
 # Player and Spider setup
-player = spawn_entity(Player, SCREEN_WIDTH // 2 - player_width // 2, SCREEN_HEIGHT - player_height - 10)
-spider = spawn_entity(Spider, 0, random.randint(10, SCREEN_HEIGHT // 2))
+player = spawn_entity(Player, SCREEN_WIDTH // 2 - player_width // 2, SCREEN_HEIGHT // 2 - player_height // 2)
 
 # Game variables
 projectiles = []
@@ -117,13 +110,31 @@ while running:
             if event.type == pygame.QUIT:
                 running = False
 
-        # Key press handling
+        # Key press handling with acceleration vector
+        acceleration_vector = pygame.Vector2(0, 0)
+        acceleration_amount = 0.5  # How much acceleration to apply per frame
+    
         keys = pygame.key.get_pressed()
         if keys[pygame.K_a] and player.rect.left > 0:
-            player.move(x_direction=-1)
+            acceleration_vector.x = -acceleration_amount
         if keys[pygame.K_d] and player.rect.right < SCREEN_WIDTH:
-            player.move(x_direction=1)
+            acceleration_vector.x = acceleration_amount
+        if keys[pygame.K_w] and player.rect.top > 0:
+            acceleration_vector.y = -acceleration_amount
+        if keys[pygame.K_s] and player.rect.bottom < SCREEN_HEIGHT:
+            acceleration_vector.y = acceleration_amount
 
+        # Apply acceleration to the player
+        player.apply_acceleration(acceleration_vector)
+
+        # If no keys are pressed, apply friction (stop accelerating)
+        if not any([keys[pygame.K_a], keys[pygame.K_d], keys[pygame.K_w], keys[pygame.K_s]]):
+            player.stop()
+
+        # Update the player's position based on velocity
+        player.move()
+
+        # Draw the player
         player.draw(screen)
         
         score_text = font.render(f"Score: {current_score}", True, WHITE)
