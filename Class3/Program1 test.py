@@ -4,7 +4,7 @@
 ####################################################################
 
 # import everything from the Person file
-from Program1 import *
+from Assignment1 import *
 
 # Create some people
 p1 = Person()
