@@ -2,19 +2,30 @@ import pygame
 import random
 import base64
 import os
+import socket
+import threading
 
 from Entities import *
-from Constants import *
+from GameConstants import *
 from PlayerData import *
+
+# Server Configuration
+HOST = '127.0.0.1'  # Localhost for testing purposes
+PORT = 5555        # Port to listen on
+
+# List to keep track of active connections
+active_connections = []
+
+# Lock for thread-safe operations on active connections
+connections_lock = threading.Lock()
 
 # Initialize pygame
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption('Spider Shooter')
+pygame.display.set_caption(GAME_NAME)
 
 # Game variables
 player_speed = 5
-spider_speed = 4
 projectile_speed = 7
 
 reload_time = 500  # Milliseconds between each shot
@@ -23,10 +34,6 @@ lives = 3
 
 current_score = 0
 p_data = PlayerData()
-
-# Resize images to desired size
-player_width, player_height = 50, 50
-spider_width, spider_height = 40, 40
 
 # Fonts
 font = pygame.font.SysFont(None, 36)
@@ -49,13 +56,15 @@ def draw_text(text, font, color, surface, x, y):
 
 def reset_game():
     """Resets the game state"""
-    global player, spider, projectiles, current_score, lives, game_over
-    player = spawn_entity(Player, (SCREEN_WIDTH // 2 - player_width // 2), (SCREEN_HEIGHT - player_height - 10))
-    spider = spawn_entity(Spider, 0, random.randint(10, SCREEN_HEIGHT // 2))
+    global player, projectiles, current_score, lives, game_over, reference_object, world_offset_x, world_offset_y
+    player = spawn_entity(Player, 0, 0)  # Player starts at world center
     projectiles = []
     current_score = 0
     lives = 3
     game_over = False
+    reference_object = pygame.Rect(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, 50, 50)  # Reset reference object position
+    world_offset_x = 0
+    world_offset_y = 0
 
 def start_screen():
     """Displays the start screen with high score, start, and exit buttons."""
@@ -63,7 +72,7 @@ def start_screen():
     exit_button_rect = pygame.Rect(SCREEN_WIDTH // 2 - button_width // 2, SCREEN_HEIGHT // 2 + 100, button_width, button_height)
 
     screen.fill(BLACK)
-    draw_text('Spider Shooter', large_font, RED, screen, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 150)
+    draw_text(f'{GAME_NAME}', large_font, RED, screen, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 150)
     draw_text(f'High Score: {p_data.get_data("high_score")}', font, WHITE, screen, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50)
 
     pygame.draw.rect(screen, GREEN, start_button_rect)
@@ -92,13 +101,56 @@ def spawn_entity(entity_class, x, y):
     """Creates and returns an instance of the specified entity class"""
     return entity_class(x, y)
 
+def handle_client(conn, addr):
+    """Handles the client connection."""
+    print(f"[NEW CONNECTION] {addr} connected.")
+    
+    with connections_lock:
+        active_connections.append((conn, addr))
+
+    connected = True
+    while connected:
+        try:
+            message = conn.recv(1024).decode('utf-8')
+            if not message:
+                break
+            # For now, just log the received message
+            print(f"[{addr}] {message}")
+        except ConnectionResetError:
+            break
+
+    # Remove the connection when client disconnects
+    with connections_lock:
+        active_connections.remove((conn, addr))
+    conn.close()
+    print(f"[DISCONNECT] {addr} disconnected.")
+
+def start_server():
+    """Starts the server and listens for new connections."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((HOST, PORT))
+    server.listen()
+    print(f"[LISTENING] Server is listening on {HOST}:{PORT}")
+
+    while True:
+        conn, addr = server.accept()
+        thread = threading.Thread(target=handle_client, args=(conn, addr))
+        thread.start()
+        print(f"[ACTIVE CONNECTIONS] {len(active_connections)}")
+
+# Start the server in a separate thread
+server_thread = threading.Thread(target=start_server, daemon=True)
+server_thread.start()
+
 # Game setup
 # Start screen
 start_screen()
 
 # Player and Spider setup
-player = spawn_entity(Player, SCREEN_WIDTH // 2 - player_width // 2, SCREEN_HEIGHT - player_height - 10)
-spider = spawn_entity(Spider, 0, random.randint(10, SCREEN_HEIGHT // 2))
+player = spawn_entity(Player, 0, 0)  # Player starts at world center
+
+# Reference object setup
+reference_object = pygame.Rect(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, 50, 50)
 
 # Game variables
 projectiles = []
@@ -106,6 +158,10 @@ last_shot_time = 0  # Track when the player last shot
 game_over = False
 running = True
 clock = pygame.time.Clock()
+
+# World offset variables
+world_offset_x = 0
+world_offset_y = 0
 
 # Main game loop
 while running:
@@ -116,14 +172,27 @@ while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
-        # Key press handling
+    
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_a] and player.rect.left > 0:
-            player.move(x_direction=-1)
-        if keys[pygame.K_d] and player.rect.right < SCREEN_WIDTH:
-            player.move(x_direction=1)
+        old_player_position = player.rect.topleft
+        player.handle_input(keys)
+        player.update()
+        new_player_position = player.rect.topleft
 
+        # Calculate the player's change in position
+        delta_x = new_player_position[0] - old_player_position[0]
+        delta_y = new_player_position[1] - old_player_position[1]
+
+        # Update the world offset by the change in player's position
+        world_offset_x -= delta_x
+        world_offset_y -= delta_y
+
+        # Draw reference object (stationary in world coordinates)
+        reference_object_moved = reference_object.move(world_offset_x, world_offset_y)
+        pygame.draw.rect(screen, RED, reference_object_moved)
+
+        # Draw player at the center of the screen
+        player.rect.topleft = (SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2)
         player.draw(screen)
         
         score_text = font.render(f"Score: {current_score}", True, WHITE)
