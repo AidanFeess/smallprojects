@@ -2,10 +2,22 @@ import pygame
 import random
 import base64
 import os
+import socket
+import threading
 
 from Entities import *
 from GameConstants import *
 from PlayerData import *
+
+# Server Configuration
+HOST = '127.0.0.1'  # Localhost for testing purposes
+PORT = 5555        # Port to listen on
+
+# List to keep track of active connections
+active_connections = []
+
+# Lock for thread-safe operations on active connections
+connections_lock = threading.Lock()
 
 # Initialize pygame
 pygame.init()
@@ -44,12 +56,15 @@ def draw_text(text, font, color, surface, x, y):
 
 def reset_game():
     """Resets the game state"""
-    global player, projectiles, current_score, lives, game_over
-    player = spawn_entity(Player, (SCREEN_WIDTH // 2 - player_width // 2), (SCREEN_HEIGHT - player_height - 10))
+    global player, projectiles, current_score, lives, game_over, reference_object, world_offset_x, world_offset_y
+    player = spawn_entity(Player, 0, 0)  # Player starts at world center
     projectiles = []
     current_score = 0
     lives = 3
     game_over = False
+    reference_object = pygame.Rect(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, 50, 50)  # Reset reference object position
+    world_offset_x = 0
+    world_offset_y = 0
 
 def start_screen():
     """Displays the start screen with high score, start, and exit buttons."""
@@ -86,12 +101,56 @@ def spawn_entity(entity_class, x, y):
     """Creates and returns an instance of the specified entity class"""
     return entity_class(x, y)
 
+def handle_client(conn, addr):
+    """Handles the client connection."""
+    print(f"[NEW CONNECTION] {addr} connected.")
+    
+    with connections_lock:
+        active_connections.append((conn, addr))
+
+    connected = True
+    while connected:
+        try:
+            message = conn.recv(1024).decode('utf-8')
+            if not message:
+                break
+            # For now, just log the received message
+            print(f"[{addr}] {message}")
+        except ConnectionResetError:
+            break
+
+    # Remove the connection when client disconnects
+    with connections_lock:
+        active_connections.remove((conn, addr))
+    conn.close()
+    print(f"[DISCONNECT] {addr} disconnected.")
+
+def start_server():
+    """Starts the server and listens for new connections."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((HOST, PORT))
+    server.listen()
+    print(f"[LISTENING] Server is listening on {HOST}:{PORT}")
+
+    while True:
+        conn, addr = server.accept()
+        thread = threading.Thread(target=handle_client, args=(conn, addr))
+        thread.start()
+        print(f"[ACTIVE CONNECTIONS] {len(active_connections)}")
+
+# Start the server in a separate thread
+server_thread = threading.Thread(target=start_server, daemon=True)
+server_thread.start()
+
 # Game setup
 # Start screen
 start_screen()
 
 # Player and Spider setup
-player = spawn_entity(Player, SCREEN_WIDTH // 2 - player_width // 2, SCREEN_HEIGHT // 2 - player_height // 2)
+player = spawn_entity(Player, 0, 0)  # Player starts at world center
+
+# Reference object setup
+reference_object = pygame.Rect(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, 50, 50)
 
 # Game variables
 projectiles = []
@@ -99,6 +158,10 @@ last_shot_time = 0  # Track when the player last shot
 game_over = False
 running = True
 clock = pygame.time.Clock()
+
+# World offset variables
+world_offset_x = 0
+world_offset_y = 0
 
 # Main game loop
 while running:
@@ -109,32 +172,27 @@ while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
-        # Key press handling with acceleration vector
-        acceleration_vector = pygame.Vector2(0, 0)
-        acceleration_amount = 0.5  # How much acceleration to apply per frame
     
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_a] and player.rect.left > 0:
-            acceleration_vector.x = -acceleration_amount
-        if keys[pygame.K_d] and player.rect.right < SCREEN_WIDTH:
-            acceleration_vector.x = acceleration_amount
-        if keys[pygame.K_w] and player.rect.top > 0:
-            acceleration_vector.y = -acceleration_amount
-        if keys[pygame.K_s] and player.rect.bottom < SCREEN_HEIGHT:
-            acceleration_vector.y = acceleration_amount
+        old_player_position = player.rect.topleft
+        player.handle_input(keys)
+        player.update()
+        new_player_position = player.rect.topleft
 
-        # Apply acceleration to the player
-        player.apply_acceleration(acceleration_vector)
+        # Calculate the player's change in position
+        delta_x = new_player_position[0] - old_player_position[0]
+        delta_y = new_player_position[1] - old_player_position[1]
 
-        # If no keys are pressed, apply friction (stop accelerating)
-        if not any([keys[pygame.K_a], keys[pygame.K_d], keys[pygame.K_w], keys[pygame.K_s]]):
-            player.stop()
+        # Update the world offset by the change in player's position
+        world_offset_x -= delta_x
+        world_offset_y -= delta_y
 
-        # Update the player's position based on velocity
-        player.move()
+        # Draw reference object (stationary in world coordinates)
+        reference_object_moved = reference_object.move(world_offset_x, world_offset_y)
+        pygame.draw.rect(screen, RED, reference_object_moved)
 
-        # Draw the player
+        # Draw player at the center of the screen
+        player.rect.topleft = (SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2)
         player.draw(screen)
         
         score_text = font.render(f"Score: {current_score}", True, WHITE)

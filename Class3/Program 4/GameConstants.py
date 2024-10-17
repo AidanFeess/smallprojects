@@ -30,4 +30,10 @@ DIR_SPRITES     = "./Sprites"
 
 # Physics constants
 FRICTION = 0.01  # Friction to apply on all entities
-GRAVITY = 0.5   # Gravity constant (for future use)
+ANGULAR_FRICTION = 0.01 # same as friction but for angles
+GRAVITY = 0.5   # Gravity constant
+
+# Player data
+PLAYER_WIDTH = 150
+PLAYER_HEIGHT = 150
+MAX_ANGULAR_VELOCITY = 1
