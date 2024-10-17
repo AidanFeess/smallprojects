@@ -9,12 +9,13 @@
 import pygame
 from random import randint, choice
 
+GAME_NAME = "Iron Tide: 1944"
 
-# constants for screen size
+# Constants for screen size
 SCREEN_WIDTH = 1000
 SCREEN_HEIGHT = 800
 
-# constants for colors
+# Constants for colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)
@@ -26,3 +27,13 @@ COLORS = [WHITE, BLACK, RED, GREEN, BLUE]
 # Directories
 DIR_PLAYER_DATA = "./PlayerData"
 DIR_SPRITES     = "./Sprites"
+
+# Physics constants
+FRICTION = 0.01  # Friction to apply on all entities
+ANGULAR_FRICTION = 0.01 # same as friction but for angles
+GRAVITY = 0.5   # Gravity constant
+
+# Player data
+PLAYER_WIDTH = 150
+PLAYER_HEIGHT = 150
+MAX_ANGULAR_VELOCITY = 1

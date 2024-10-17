@@ -1,14 +1,14 @@
 import json
 import os
 
-from Constants import *
+from GameConstants import *
 
 class PlayerData:
     def __init__(self, filename=f"{DIR_PLAYER_DATA}/player_data.json"):
         """Initialize the player data handler with a file for storing data."""
         self.filename = filename
         self.data = {
-            "player_name": "Hero",
+            "player_name": "Greg",
             "level": 1,
             "high_score": 0,
         }
