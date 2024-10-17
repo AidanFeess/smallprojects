@@ -37,7 +37,7 @@ def handle_client(conn, addr):
             
             # Prepare player data to send to all clients
             players_data = ";".join([f"{data['name']},{data['position'][0]},{data['position'][1]}" for data in player_data.values()])
-            
+            print(players_data)
             # Send updated player position, world objects, and other players' data back to the client
             response_data = f"{new_position_x},{new_position_y}"
             world_objects_data = ";".join([f"{obj['type']},{obj['rect'].x},{obj['rect'].y},{obj['rect'].width},{obj['rect'].height}" for obj in world_objects])

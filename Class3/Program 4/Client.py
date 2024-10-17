@@ -28,6 +28,9 @@ world_objects = []
 # Other players list to store data received from server
 other_players = []
 
+# Lock to ensure thread safety when updating data
+data_lock = threading.Lock()
+
 # Function to handle server communication
 def receive_data():
     while True:
@@ -38,23 +41,24 @@ def receive_data():
             # Parse received data
             player_data, world_objects_data, other_players_data = data.split('|')
             
-            # Parse world objects
-            world_objects.clear()
-            world_objects_split = world_objects_data.split(';')
-            for obj_str in world_objects_split:
-                if obj_str:
-                    obj_info = obj_str.split(',')
-                    if len(obj_info) == 5:
-                        world_objects.append({'type': obj_info[0], 'rect': pygame.Rect(int(obj_info[1]), int(obj_info[2]), int(obj_info[3]), int(obj_info[4]))})
-            
-            # Parse other players
-            other_players.clear()
-            other_players_split = other_players_data.split(';')
-            for player_str in other_players_split:
-                if player_str:
-                    player_info = player_str.split(',')
-                    if len(player_info) == 3:
-                        other_players.append({'name': player_info[0], 'position': (int(player_info[1]), int(player_info[2]))})
+            with data_lock:
+                # Parse world objects
+                world_objects.clear()
+                world_objects_split = world_objects_data.split(';')
+                for obj_str in world_objects_split:
+                    if obj_str:
+                        obj_info = obj_str.split(',')
+                        if len(obj_info) == 5:
+                            world_objects.append({'type': obj_info[0], 'rect': pygame.Rect(int(obj_info[1]), int(obj_info[2]), int(obj_info[3]), int(obj_info[4]))})
+                
+                # Parse other players
+                other_players.clear()
+                other_players_split = other_players_data.split(';')
+                for player_str in other_players_split:
+                    if player_str:
+                        player_info = player_str.split(',')
+                        if len(player_info) == 3:
+                            other_players.append({'name': player_info[0], 'position': (int(player_info[1]), int(player_info[2]))})
         except (ConnectionResetError, ValueError):
             break
 
@@ -98,15 +102,17 @@ while running:
     # Send player position to the server
     client_socket.send(f"{player_velocity[0]},{player_velocity[1]}".encode('utf-8'))
 
-    # Draw world objects
-    for obj in world_objects:
-        obj_rect_moved = obj['rect'].move(-player_position[0] + 400, -player_position[1] + 300)
-        pygame.draw.rect(screen, (255, 0, 0), obj_rect_moved)
+    # Acquire lock before accessing shared data
+    with data_lock:
+        # Draw world objects
+        for obj in world_objects:
+            obj_rect_moved = obj['rect'].move(-player_position[0] + 400, -player_position[1] + 300)
+            pygame.draw.rect(screen, (255, 0, 0), obj_rect_moved)
 
-    # Draw other players
-    for player in other_players:
-        if player['name'] != "You":
-            other_player_rect = pygame.Rect(player['position'][0] - player_position[0] + 400, player['position'][1] - player_position[1] + 300, PLAYER_WIDTH, PLAYER_HEIGHT)
+        # Draw other players
+        for player in other_players:
+            other_player_position = player['position']
+            other_player_rect = pygame.Rect(other_player_position[0] - player_position[0] + 400, other_player_position[1] - player_position[1] + 300, PLAYER_WIDTH, PLAYER_HEIGHT)
             pygame.draw.rect(screen, (0, 255, 0), other_player_rect)
             text_surface = FONT.render(player['name'], True, (255, 255, 255))
             screen.blit(text_surface, (other_player_rect.x, other_player_rect.y - 20))
