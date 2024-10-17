@@ -6,7 +6,7 @@
 import pygame
 from random import randint, choice
 from Item import *
-from Constants02 import *
+from Constants import *
 class Person(pygame.sprite.Sprite, Item):
 
     def __init__(self, name = "player 1", x = 0, y = 0, size = 1):
