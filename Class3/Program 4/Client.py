@@ -1,137 +1,158 @@
-import socket
-import threading
+import socket, struct
+import threading, json, time
 import pygame
 
-# Server Configuration
-HOST = '127.0.0.1'  # Change this to the server's IP if running on a different machine
-PORT = 5555
+from GameConstants import *
 
-# Initialize pygame
-pygame.init()
-screen = pygame.display.set_mode((800, 600))
-pygame.display.set_caption("Basic Client")
+class NetworkClient:
+    """
+    A client class that handles client connections to the server,
+    stores and receives data from the server. Meant to only be
+    used indirectly through the GameClient
+    """
 
-# Fonts
-FONT = pygame.font.SysFont(None, 36)
+    def __init__(self, gameClient: 'GameClient', host: str = "127.0.0.1", port: int = 44200):
+        # basic server stuff
+        self.host = host
+        self.port = port
+        self.gameClient = gameClient
 
-# Player Configuration
-PLAYER_WIDTH, PLAYER_HEIGHT = 30, 30
-player_position = [400, 300]
-player_velocity = [0, 0]
+        # for reconnection
+        self.connection = None
+        self.connected = False
+        self.reconnect_attempts = 0
 
-# Socket Configuration
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket.connect((HOST, PORT))
+        # Connect to the server
+        self.connect_to_server()
 
-# World objects list to store data received from server
-world_objects = []
-# Other players list to store data received from server
-other_players = []
+        # Start a separate thread for network communication
+        self.network_thread = threading.Thread(target=self.run_network, daemon=True)
+        self.network_thread.start()
 
-# Lock to ensure thread safety when updating data
-data_lock = threading.Lock()
+    def run_network(self):
+        """
+        The main network loop runs in a separate thread, continuously sending
+        and receiving data from the server.
+        """
+        while self.connected:
+            try:
+                # Create the packet before sending
+                newPacket = self.serialize_client_data(
+                    ClientPacket(
+                        username=self.gameClient.username,
+                        position=self.gameClient.position,
+                        gameData=self.gameClient.gameData
+                    )
+                )
 
-# Function to handle server communication
-def receive_data():
-    while True:
+                # Send the packet with a length prefix
+                self.send_with_length_prefix(newPacket)
+                time.sleep(0.1)  # send data every 100 ms
+
+            except (socket.error, OSError) as e:
+                print(f"Network error: {e}. Attempting to reconnect...")
+                self.reconnect_to_server()
+
+    def connect_to_server(self):
+        """
+        Attempts to establish a connection to the server.
+        """
         try:
-            data = client_socket.recv(1024).decode('utf-8')
-            if not data:
-                break
-            # Parse received data
-            player_data, world_objects_data, other_players_data = data.split('|')
-            
-            with data_lock:
-                # Parse world objects
-                world_objects.clear()
-                world_objects_split = world_objects_data.split(';')
-                for obj_str in world_objects_split:
-                    if obj_str:
-                        obj_info = obj_str.split(',')
-                        if len(obj_info) == 5:
-                            world_objects.append({'type': obj_info[0], 'rect': pygame.Rect(int(obj_info[1]), int(obj_info[2]), int(obj_info[3]), int(obj_info[4]))})
-                
-                # Parse other players
-                other_players.clear()
-                other_players_split = other_players_data.split(';')
-                for player_str in other_players_split:
-                    if player_str:
-                        player_info = player_str.split(',')
-                        if len(player_info) == 3:
-                            other_players.append({'name': player_info[0], 'position': (int(player_info[1]), int(player_info[2]))})
-        except (ConnectionResetError, ValueError):
-            break
+            self.connection = socket.create_connection((self.host, self.port))
+            self.connected = True
+            self.reconnect_attempts = 0
+            print(f"Connected to server at {self.host}:{self.port}")
 
-# Start a thread to receive data from the server
-receive_thread = threading.Thread(target=receive_data, daemon=True)
-receive_thread.start()
+            # Receive the server info packet (initial handshake or entry message)
+            self.serverInfo = self.deserialize_server_data(self.connection.recv(1024))
 
-# Game variables
-running = True
-clock = pygame.time.Clock()
+        except (socket.error, OSError) as e:
+            print(f"Failed to connect to server: {e}")
+            self.connected = False
+            self.reconnect_to_server()
 
-# Main game loop
-while running:
-    screen.fill((0, 0, 0))
+    def reconnect_to_server(self):
+        """
+        Attempts to reconnect to the server.
+        """
+        while not self.connected and self.reconnect_attempts < 5:  # Try up to 5 reconnection attempts
+            self.reconnect_attempts += 1
 
-    # Event handling
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_a]:
-        player_velocity[0] = -5
-    elif keys[pygame.K_d]:
-        player_velocity[0] = 5
-    else:
-        player_velocity[0] = 0
+            try:
+                time.sleep(2)  # Wait 2 seconds between attempts
+                self.connect_to_server()
 
-    if keys[pygame.K_w]:
-        player_velocity[1] = -5
-    elif keys[pygame.K_s]:
-        player_velocity[1] = 5
-    else:
-        player_velocity[1] = 0
+            except Exception as e:
+                print(f"Reconnect attempt failed: {e}")
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-            print("[QUIT] Quit event received, stopping game loop.")
+        if not self.connected:
+            print("Failed to reconnect after 5 attempts. Disconnecting.")
+            self.disconnect()
 
-    # Update player position
-    player_position[0] += player_velocity[0]
-    player_position[1] += player_velocity[1]
+    def disconnect(self):
+        """
+        Gracefully closes the connection.
+        """
+        self.connected = False
+        if self.connection:
+            self.connection.close()
+        print("Client disconnected.")
 
-    # Send player position to the server
-    client_socket.send(f"{player_velocity[0]},{player_velocity[1]}".encode('utf-8'))
+    def send_with_length_prefix(self, data: bytes):
+        """
+        Sends data with a length prefix.
+        """
+        try:
+            length_prefix = struct.pack('!I', len(data))
+            self.connection.sendall(length_prefix + data)
 
-    # Acquire lock before accessing shared data
-    with data_lock:
-        # Draw world objects
-        for obj in world_objects:
-            obj_rect_moved = obj['rect'].move(-player_position[0] + 400, -player_position[1] + 300)
-            pygame.draw.rect(screen, (255, 0, 0), obj_rect_moved)
+        except (socket.error, OSError) as e:
+            print(f"Error sending data: {e}")
+            self.reconnect_to_server()
 
-        # Draw other players
-        for player in other_players:
-            other_player_position = player['position']
-            other_player_rect = pygame.Rect(other_player_position[0] - player_position[0] + 400, other_player_position[1] - player_position[1] + 300, PLAYER_WIDTH, PLAYER_HEIGHT)
-            pygame.draw.rect(screen, (0, 255, 0), other_player_rect)
-            text_surface = FONT.render(player['name'], True, (255, 255, 255))
-            screen.blit(text_surface, (other_player_rect.x, other_player_rect.y - 20))
+    def serialize_client_data(self, packet: 'ClientPacket') -> bytes:
+        """
+        Converts the dataclass to a dictionary for JSON serialization.
+        """
+        data_dict = {
+            "username": packet.username,
+            "position": {"x": packet.position.x, "y": packet.position.y},
+            "gameData": {"HP": packet.gameData.HP}
+        }
 
-    # Draw player
-    player_rect = pygame.Rect(400, 300, PLAYER_WIDTH, PLAYER_HEIGHT)
-    pygame.draw.rect(screen, (0, 0, 255), player_rect)
-    text_surface = FONT.render("You", True, (255, 255, 255))
-    screen.blit(text_surface, (player_rect.x, player_rect.y - 20))
+        return json.dumps(data_dict).encode('utf-8')
 
-    # Refresh the screen
-    pygame.display.flip()
+    def deserialize_server_data(self, data: bytes):
+        """
+        Deserializes the server info packet from the server.
+        """
+        data_dict = json.loads(data.decode('utf-8'))
+        return ServerJoinPacket(
+            servername=data_dict["servername"],
+            serverip=data_dict["serverip"],
+            serverport=data_dict["serverport"]
+        )
 
-    # Cap the frame rate
-    clock.tick(60)
 
-# Quit pygame
-pygame.quit()
-print("[QUIT] Pygame terminated.")
+class GameClient():
+    """
+    A client class meant to be used directly for a player. Holds important
+    data and functions that allow for logging into servers and manipulating
+    the player's presence in the game world.
 
-# Close socket connection
-client_socket.close()
+    Args:
+        gameData (dict): A dictionary of game data like health, upgrades, etc.
+        username (str): The user's username
+        position (Vector3): The player's current Vector2 position
+    """
+    def __init__(self, gameData: GameData, username: str = "Guest", position: Position = (0, 0)):
+        self.gameData = gameData
+        self.username = username
+        self.position = position
+
+    def connectToServer(self, ip: str = "127.0.0.1", port: int = 44200):
+        self.networkClient = NetworkClient(self, ip, port)
+
+newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 0))
+newClient.connectToServer()
+

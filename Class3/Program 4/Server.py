@@ -1,115 +1,203 @@
-import socket
-import threading
+import logging.handlers
+import socket, threading, logging
+import struct, json
 import pygame
 
-# Server Configuration
-HOST = '0.0.0.0'
-PORT = 5555
+from GameConstants import *
 
-# List to keep track of active connections and player data
-active_connections = []
-player_data = {}
+class NetworkServer():
+    """
+    A network server class that creates and hosts a new network server
+    that manages client connections, and serves data to clients while alive.
 
-# World objects list to store positions and other relevant data
-world_objects = [{'type': 'reference', 'rect': pygame.Rect(400, 300, 50, 50)}]
+    Args:
+        gameServer (GameServer): A game server that holds game data like server name and world positions.
+        host (str): A host IP address, defaults to local (127.0.0.1), common alternative is 0.0.0.0 for public.
+        port (int): The desired port, defaults to 44200.
+    """
+    def __init__(self, gameServer: 'GameServer', host: str = "127.0.0.1", port: int = 44200):
+        ## Declare the instance
+        self.serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.shutdown_event = threading.Event()  # Create an event to signal server shutdown
+        self.gameServer = gameServer
+        self.live_clients = []
 
-def handle_client(conn, addr):
-    """Handles the client connection."""
-    print(f"[NEW CONNECTION] {addr} connected.")
-    
-    active_connections.append((conn, addr))
-    player_data[addr] = {'position': (400, 300), 'name': f'Player_{len(active_connections)}'}
+        # The 'entry message' sent to every client when they join the server.
+        self.entryMessage = self.serialize_server_data(
+            ServerJoinPacket(
+                servername=gameServer.serverName,
+                serverip=gameServer.serverIp,
+                serverport=gameServer.serverPort
+            )
+        )
 
-    connected = True
-    while connected:
+        # Set up log file
+        self.logfilePath = SERVERDATADIR / f"Server.log"
+        with open(self.logfilePath, 'a'):  # Create the log file
+            pass
+
+        handlers = [logging.handlers.RotatingFileHandler(
+            filename=self.logfilePath,
+            mode='w',
+            maxBytes=512000,
+            backupCount=0
+        )]
+        self.BasicConfig = logging.basicConfig(
+            handlers=handlers,
+            level=0,
+            format='%(levelname)s %(asctime)s | %(message)s',
+            datefmt='%m/%d/%Y %I:%M:%S %p'
+        )
+        
+        self.logger = logging.getLogger("server")
+        self.logger.info(f"Server initialized")
+
+        # Bind and listen
+        self.serverSocket.bind((host, port))
+        self.serverSocket.listen()
+
+        # Start the client-handling thread
+        self.clientThread = threading.Thread(target=self.startClientHandling, name="client-thread", daemon=True)
+        self.clientThread.start()
+
         try:
-            message = conn.recv(1024).decode('utf-8')
-            if not message:
-                break
-            # Parse the received message (expected format: vx,vy)
-            velocity_x, velocity_y = map(float, message.split(','))
-            
-            # Update player position
-            player = player_data[addr]
-            new_position_x = player['position'][0] + velocity_x
-            new_position_y = player['position'][1] + velocity_y
-            player['position'] = (new_position_x, new_position_y)
-            
-            # Prepare player data to send to all clients
-            players_data = ";".join([f"{data['name']},{data['position'][0]},{data['position'][1]}" for data in player_data.values()])
-            print(players_data)
-            # Send updated player position, world objects, and other players' data back to the client
-            response_data = f"{new_position_x},{new_position_y}"
-            world_objects_data = ";".join([f"{obj['type']},{obj['rect'].x},{obj['rect'].y},{obj['rect'].width},{obj['rect'].height}" for obj in world_objects])
-            response_data = f"{response_data}|{world_objects_data}|{players_data}"
-            conn.send(response_data.encode('utf-8'))
-        except (ConnectionResetError, ValueError):
-            break
+            self.logger.info("Server started")
+            while not self.shutdown_event.is_set():  # Main server loop checks shutdown event
+                self.shutdown_event.wait(1)  # Wait for 1 second, then re-check if shutdown is requested
 
-    # Remove the connection when client disconnects
-    active_connections.remove((conn, addr))
-    del player_data[addr]
-    conn.close()
-    print(f"[DISCONNECT] {addr} disconnected.")
+        except KeyboardInterrupt:
+            self.logger.info("Server shutdown requested via KeyboardInterrupt")
 
-def start_server():
-    """Starts the server and listens for new connections."""
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen()
-    print(f"[LISTENING] Server is listening on {HOST}:{PORT}")
+        finally:
+            self.shutdown()
 
-    while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
-        thread.start()
-        print(f"[ACTIVE CONNECTIONS] {len(active_connections)}")
+    def startClientHandling(self):
+        while not self.shutdown_event.is_set():  # Check for server shutdown in the client-handling thread
+            try:
+                self.serverSocket.settimeout(1)  # Add a timeout to avoid blocking indefinitely
+                clientSock, clientAddr = self.serverSocket.accept()
+                if clientSock in self.live_clients: # dont accept duplicate clients, not sure if this will work?
+                    continue
+                threading.Thread(target=self.handleClient, args=(clientSock, clientAddr), daemon=True).start() # sub thread for each connected client
+            except socket.timeout:
+                continue  # Timeout occurred, check again if shutdown_event is set
 
-# Start the server in a separate thread
-server_thread = threading.Thread(target=start_server, daemon=True)
-server_thread.start()
+    def handleClient(self, clientSock: socket.socket, clientAddr):
+        """
+        Handles communication with a connected client.
+        
+        Args:
+            clientSock (socket): The socket object for the connected client.
+            clientAddr (tuple): The client's address.
+        """
+        try:
+            self.logger.info(f"Client {clientAddr} connected.")
+            self.live_clients.append(clientSock)
 
-# Initialize pygame
-pygame.init()
-screen = pygame.display.set_mode((800, 600))
-pygame.display.set_caption("Basic Server Visualization")
+            # Give the client basic log-in information
+            clientSock.sendall(self.entryMessage)
 
-# Fonts
-FONT = pygame.font.SysFont(None, 36)
+            while not self.shutdown_event.is_set():
+                # Try to receive the message length (4 bytes)
+                raw_length = self.recv_exact(clientSock, 4)
+                if not raw_length:
+                    break  # Client disconnected
 
-# Game variables
-running = True
-clock = pygame.time.Clock()
+                # Get the actual message length
+                message_length = struct.unpack('!I', raw_length)[0]
 
-# Main game loop
-while running:
-    screen.fill((0, 0, 0))
+                # Receive the actual message
+                rawClientPacket = self.recv_exact(clientSock, message_length)
+                if not rawClientPacket:
+                    break  # Client disconnected
 
-    # Event handling
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-            print("[QUIT] Quit event received, stopping game loop.")
+                # Deserialize the data
+                clientPacket = self.deserialize_client_data(rawClientPacket)
+                
+                # Echo the data back to the client (optional)
+                clientSock.sendall(rawClientPacket)
 
-    # Draw world objects
-    for obj in world_objects:
-        pygame.draw.rect(screen, (255, 0, 0), obj['rect'])
+        except ConnectionResetError as e:
+            self.logger.warning(f"Client {clientAddr} disconnected unexpectedly: {e}")
+        except Exception as e:
+            self.logger.exception(f"There was an error while handling a client: {e}")
+        finally:
+            self.cleanup_client(clientSock, clientAddr)
 
-    # Draw players from player_data
-    for addr, data in player_data.items():
-        position = data['position']
-        player_rect = pygame.Rect(position[0], position[1], 30, 30)
-        pygame.draw.rect(screen, (0, 0, 255), player_rect)
-        # Draw player name above the player
-        text_surface = FONT.render(data['name'], True, (255, 255, 255))
-        screen.blit(text_surface, (player_rect.x, player_rect.y - 20))
+    def recv_exact(self, sock: socket.socket, length: int) -> bytes:
+        """
+        Receives the exact number of bytes from the socket.
 
-    # Refresh the screen
-    pygame.display.flip()
+        Args:
+            sock (socket): The socket to receive from.
+            length (int): The number of bytes to receive.
 
-    # Cap the frame rate
-    clock.tick(60)
+        Returns:
+            bytes: The received data, or None if the connection is closed.
+        """
+        data = b''
+        try:
+            while len(data) < length:
+                packet = sock.recv(length - len(data))
+                if not packet:
+                    return None  # Connection closed by the client
+                data += packet
+            return data
+        except (ConnectionResetError, ConnectionAbortedError):
+            return None  # Client disconnected unexpectedly
 
-# Quit pygame
-pygame.quit()
-print("[QUIT] Pygame terminated.")
+    def cleanup_client(self, clientSock: socket.socket, clientAddr):
+        """
+        Cleans up the client connection after disconnection or error.
+        
+        Args:
+            clientSock (socket): The socket object for the client.
+            clientAddr (tuple): The client's address.
+        """
+        if clientSock in self.live_clients:
+            self.live_clients.remove(clientSock)
+        clientSock.close()
+        self.logger.info(f"Client {clientAddr} disconnected and cleaned up.")
+
+    def serialize_server_data(self, packet: ServerJoinPacket) -> bytes:
+        # Convert the dataclass to a dictionary for JSON serialization
+        data_dict = {
+            "servername": packet.servername,
+            "serverip": packet.serverip,
+            "serverport": packet.serverport
+        }
+        return json.dumps(data_dict).encode('utf-8')
+
+    def deserialize_client_data(self, data: bytes) -> ClientPacket:
+        data_dict = json.loads(data.decode('utf-8')) # opposite of serializing
+        position = Position(**data_dict['position'])
+        gameData = GameData(**data_dict['gameData'])
+        return ClientPacket(username=data_dict['username'], position=position, gameData=gameData)
+
+    def shutdown(self):
+        """Gracefully shuts down the server."""
+        self.logger.info("Shutting down the server...")
+        self.shutdown_event.set()  # Signal all threads to stop
+        self.clientThread.join()  # Ensure the client-handling thread stops
+        self.serverSocket.close()  # Close the server socket
+        self.logger.info("Server shutdown complete.")
+
+class GameServer():
+    """
+    A gameserver that allows for the creation, deletion, and editing of objects
+    as well as the visualization of the game world if needed.
+    """
+
+    def __init__(self, serverName = "OfficialServer", serverIp = "127.0.0.1", serverPort = 44200, isVisual = False):
+        self.serverName = serverName
+        self.serverIp = serverIp
+        self.serverPort = serverPort
+        self.isVisual = isVisual
+        
+        self.networkServer = NetworkServer(self, serverIp, serverPort)
+    
+    def visualizeGameData():
+        pass
+
+# Create and start the server
+newServer = GameServer()
