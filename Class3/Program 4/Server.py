@@ -21,6 +21,7 @@ class NetworkServer():
         self.shutdown_event = threading.Event()  # Create an event to signal server shutdown
         self.gameServer = gameServer
         self.live_clients = []
+        self.all_client_data = {} # super hack way to do this, its 3 am
 
         # The 'entry message' sent to every client when they join the server.
         self.entryMessage = self.serialize_server_data(
@@ -113,9 +114,14 @@ class NetworkServer():
 
                 # Deserialize the data
                 clientPacket = self.deserialize_client_data(rawClientPacket)
-                
-                # Echo the data back to the client (optional)
-                clientSock.sendall(rawClientPacket)
+                self.all_client_data[clientAddr[1]] = rawClientPacket
+                combined_data = json.dumps({
+                    addr: rawPacket.decode('utf-8') if rawPacket is not None else None 
+                    for addr, rawPacket in self.all_client_data.items()
+                }) + "\n"
+
+                clientSock.sendall(combined_data.encode('utf-8'))
+
 
         except ConnectionResetError as e:
             self.logger.warning(f"Client {clientAddr} disconnected unexpectedly: {e}")
@@ -154,6 +160,7 @@ class NetworkServer():
             clientSock (socket): The socket object for the client.
             clientAddr (tuple): The client's address.
         """
+        self.all_client_data[clientAddr[1]] = None
         if clientSock in self.live_clients:
             self.live_clients.remove(clientSock)
         clientSock.close()

@@ -5,9 +5,12 @@
 #   from Constants import *
 #####################################################################
 
+# NOTE: This is honestly more of a general data file at this point
+
 # import libraries that you will need
 from dataclasses import dataclass
 from pathlib import Path
+import pygame, io
 
 GAME_NAME = "Iron Tide: 1944"
 
@@ -37,8 +40,8 @@ ANGULAR_FRICTION = 0.01 # same as friction but for angles
 GRAVITY = 0.5   # Gravity constant
 
 ## Player data
-PLAYER_WIDTH = 150
-PLAYER_HEIGHT = 150
+PLAYER_WIDTH = 50
+PLAYER_HEIGHT = 50
 MAX_ANGULAR_VELOCITY = 1
 
 ## Some dataclasses to make it clearer what is being sent between the client and server
@@ -65,3 +68,36 @@ class ServerJoinPacket:
     servername: str
     serverip: str
     serverport: int
+
+# Objects
+@dataclass
+class ObjectType:
+    isRect: bool
+    isCircle: bool
+    isSprite: bool
+
+@dataclass
+class WorldObject:
+    worldPosition: Position
+    color: pygame.color
+    height: int
+    width: int
+    objectType: ObjectType
+    sprite: pygame.sprite = None
+
+# Helper functions
+def ConvertBasicToWorldPosition(basic: pygame.Vector2) -> pygame.Vector2:
+    '''
+    Converts a basic pygame position to a world position, beginning from the center of the screen.
+    '''
+    return pygame.Vector2(SCREEN_WIDTH//2 - basic.x, SCREEN_HEIGHT//2 - basic.y)
+
+def CalculateScreenPosition(worldPosition: pygame.Vector2, playerPosition: pygame.Vector2) -> pygame.Vector2:
+    '''
+    Converts a world position to screen coordinates relative to the player's position.
+    This approach ensures all clients have a consistent frame of reference.
+    '''
+    return pygame.Vector2(
+        SCREEN_WIDTH // 2 + (worldPosition.x - playerPosition.x),
+        SCREEN_HEIGHT // 2 + (worldPosition.y - playerPosition.y)
+    )
