@@ -57,6 +57,11 @@ class NetworkServer():
         self.serverSocket.bind((host, port))
         self.serverSocket.listen()
 
+        # Create a UDP socket for server discovery
+        self.udp_broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp_broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        self.udp_broadcast_socket.bind(('', port))  # Bind to the same port for discovery
+
         # Start the client-handling thread
         self.clientThread = threading.Thread(target=self.startClientHandling, name="client-thread", daemon=True)
         self.clientThread.start()
@@ -64,6 +69,7 @@ class NetworkServer():
         try:
             self.logger.info("Server started")
             while not self.shutdown_event.is_set():  # Main server loop checks shutdown event
+                self.check_for_discovery_request() # also using it to check for discovery requests
                 self.shutdown_event.wait(1)  # Wait for 1 second, then re-check if shutdown is requested
 
         except KeyboardInterrupt:
@@ -72,12 +78,24 @@ class NetworkServer():
         finally:
             self.shutdown()
 
+    def check_for_discovery_request(self):
+        """Check for UDP broadcast discovery requests and respond to them."""
+        self.udp_broadcast_socket.settimeout(0.1)  # Non-blocking or short timeout
+        try:
+            message, client_address = self.udp_broadcast_socket.recvfrom(1024)
+            if message.decode('utf-8') == "DISCOVER_SERVERS":
+                response_message = f"{self.gameServer.serverName}\n{socket.gethostbyname(socket.gethostname())}"
+                self.udp_broadcast_socket.sendto(response_message.encode('utf-8'), client_address)
+        except socket.timeout:
+            pass  # No message received, continue
+
     def startClientHandling(self):
         while not self.shutdown_event.is_set():  # Check for server shutdown in the client-handling thread
             try:
                 self.serverSocket.settimeout(1)  # Add a timeout to avoid blocking indefinitely
                 clientSock, clientAddr = self.serverSocket.accept()
-                if clientSock in self.live_clients: # dont accept duplicate clients, not sure if this will work?
+                if clientAddr[0] in self.live_clients: # not accepting duplicate clients
+                    clientSock.sendall("[CLOSECONNECTION]".encode('utf-8'))
                     continue
                 threading.Thread(target=self.handleClient, args=(clientSock, clientAddr), daemon=True).start() # sub thread for each connected client
             except socket.timeout:
@@ -93,7 +111,7 @@ class NetworkServer():
         """
         try:
             self.logger.info(f"Client {clientAddr} connected.")
-            self.live_clients.append(clientSock)
+            self.live_clients.append(clientAddr[0])
 
             # Give the client basic log-in information
             clientSock.sendall(self.entryMessage)
@@ -114,7 +132,7 @@ class NetworkServer():
 
                 # Deserialize the data
                 clientPacket = self.deserialize_client_data(rawClientPacket)
-                self.all_client_data[clientAddr[1]] = rawClientPacket
+                self.all_client_data[clientAddr[0]] = rawClientPacket
                 combined_data = json.dumps({
                     addr: rawPacket.decode('utf-8') if rawPacket is not None else None 
                     for addr, rawPacket in self.all_client_data.items()
@@ -160,9 +178,8 @@ class NetworkServer():
             clientSock (socket): The socket object for the client.
             clientAddr (tuple): The client's address.
         """
-        self.all_client_data[clientAddr[1]] = None
-        if clientSock in self.live_clients:
-            self.live_clients.remove(clientSock)
+        del(self.all_client_data[clientAddr[0]]) # remove entry in client data
+        self.live_clients.remove(clientAddr[0]) # remove the live client
         clientSock.close()
         self.logger.info(f"Client {clientAddr} disconnected and cleaned up.")
 
@@ -187,6 +204,7 @@ class NetworkServer():
         self.shutdown_event.set()  # Signal all threads to stop
         self.clientThread.join()  # Ensure the client-handling thread stops
         self.serverSocket.close()  # Close the server socket
+        self.udp_broadcast_socket.close()
         self.logger.info("Server shutdown complete.")
 
 class GameServer():
@@ -200,11 +218,13 @@ class GameServer():
         self.serverIp = serverIp
         self.serverPort = serverPort
         self.isVisual = isVisual
-        
-        self.networkServer = NetworkServer(self, serverIp, serverPort)
+
+    def start(self):
+        self.networkServer = NetworkServer(self, self.serverIp, self.serverPort)
     
     def visualizeGameData():
         pass
 
 # Create and start the server
-newServer = GameServer()
+newServer = GameServer(serverIp="0.0.0.0")
+newServer.start()
