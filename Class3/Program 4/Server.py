@@ -94,9 +94,6 @@ class NetworkServer():
             try:
                 self.serverSocket.settimeout(1)  # Add a timeout to avoid blocking indefinitely
                 clientSock, clientAddr = self.serverSocket.accept()
-                if clientAddr[0] in self.live_clients: # not accepting duplicate clients
-                    clientSock.sendall("[CLOSECONNECTION]".encode('utf-8'))
-                    continue
                 threading.Thread(target=self.handleClient, args=(clientSock, clientAddr), daemon=True).start() # sub thread for each connected client
             except socket.timeout:
                 continue  # Timeout occurred, check again if shutdown_event is set
@@ -226,5 +223,5 @@ class GameServer():
         pass
 
 # Create and start the server
-newServer = GameServer(serverName="TestServer", serverIp="0.0.0.0")
+newServer = GameServer(serverName="Test Server", serverIp="0.0.0.0")
 newServer.start()

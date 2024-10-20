@@ -171,6 +171,7 @@ def discover_servers_async(servers, lock, port=44200, timeout=3):
     try:
         while pygame.time.get_ticks() - start_time < timeout * 1000:
             try:
+                print('greg')
                 response, serveraddress = client_sock.recvfrom(1024)
                 with lock:
                     servers.append(response.decode('utf-8'))
@@ -361,14 +362,21 @@ class Debugger:
             self.key_history.pop(0)
     
     def ping_server(self, hostname: str, port: int) -> str:
-        """Ping server and return latency in milliseconds"""
+        """Ping server using UDP and return latency in milliseconds without establishing a full connection."""
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2)
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(.1)
 
             start_time = time.time()
-            s.connect((hostname, port))
-            s.close()
+            # Send a small, empty packet to the server using UDP
+            s.sendto(b'', (hostname, port))
+            
+            try:
+                # Receive data back (if server responds)
+                s.recvfrom(1024)
+            except socket.timeout:
+                # If no response, it's still a valid ping, we're only measuring time
+                pass
 
             ping_ms = (time.time() - start_time) * 1000
             self.last_ping = str(round(ping_ms))
@@ -489,6 +497,7 @@ clock = pygame.time.Clock()
 running = True
 dt = 0
 debugger = Debugger()
+discoverThread = None
 
 ## Pygame Functions
 def display_game(screen):
@@ -555,7 +564,7 @@ def display_server_select(screen):
     lock = threading.Lock()
 
     # Start the asynchronous server discovery
-    threading.Thread(target=discover_servers_async, args=(servers, lock), daemon=True).start()
+    discoverThread: threading.Thread = threading.Thread(target=discover_servers_async, args=(servers, lock), daemon=True).start()
 
     # Main loop
     while running:
