@@ -235,25 +235,28 @@ class GameClient():
 
     def detect_collision(self):
         player_rect = pygame.Rect(SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2, PLAYER_WIDTH, PLAYER_HEIGHT)
-        terrain = self.server_data.terrain
+        try:
+            terrain = self.server_data.terrain
 
-        self.grounded = False
+            self.grounded = False
 
-        for i in range(len(terrain) - 1):
-            line_start = pygame.Vector2(terrain[i])
-            line_end = pygame.Vector2(terrain[i + 1])
+            for i in range(len(terrain) - 1):
+                line_start = pygame.Vector2(terrain[i])
+                line_end = pygame.Vector2(terrain[i + 1])
 
-            # Adjust these to screen coordinates only for drawing or hit testing
-            screen_line_start = CalculateScreenPosition(line_start, self.position)
-            screen_line_end = CalculateScreenPosition(line_end, self.position)
+                # Adjust these to screen coordinates only for drawing or hit testing
+                screen_line_start = CalculateScreenPosition(line_start, self.position)
+                screen_line_end = CalculateScreenPosition(line_end, self.position)
 
-            if line_rect_collision(screen_line_start, screen_line_end, player_rect):
-                self.grounded = True
-                self.velocity_y = 0  # Stop falling
-                self.position.y = min(line_start.y, line_end.y) - PLAYER_HEIGHT // 2  # Snap player to world terrain
-                return True
+                if line_rect_collision(screen_line_start, screen_line_end, player_rect):
+                    self.grounded = True
+                    self.velocity_y = 0  # Stop falling
+                    self.position.y = min(line_start.y, line_end.y) - PLAYER_HEIGHT // 2  # Snap player to world terrain
+                    return True
 
-        return False
+            return False
+        except:
+            return False
 
     def apply_gravity(self, dt):
         # Only apply gravity if the player is not grounded
