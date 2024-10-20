@@ -134,7 +134,7 @@ class NetworkServer():
                 clientPacket = self.deserialize_client_data(rawClientPacket)
                 self.all_client_data[clientAddr[0]] = rawClientPacket
                 combined_data = json.dumps({
-                    addr: rawPacket.decode('utf-8') if rawPacket is not None else None 
+                    addr: rawPacket.decode('utf-8') if rawPacket is not None and rawPacket != rawClientPacket else None 
                     for addr, rawPacket in self.all_client_data.items()
                 }) + "\n"
 

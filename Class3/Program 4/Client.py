@@ -239,9 +239,9 @@ class GameClient():
     def renderOtherClients(self, screen):
         for client in self.allClients:
             # Convert string to dictionary
+            if self.allClients[client] == None:
+                continue
             client = json.loads(self.allClients[client])
-            if client['username'] == self.username:
-                continue  # Skip the current client (player)
 
             # Get the client position and convert to screen coordinates
             clientPosition = client['position']
