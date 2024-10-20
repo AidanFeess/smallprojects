@@ -25,6 +25,7 @@ BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+LIGHT_BLUE = (135, 206, 235)
 
 COLORS = [WHITE, BLACK, RED, GREEN, BLUE]
 
@@ -38,7 +39,7 @@ ABSSERVERDATADIR = SERVERDATADIR.resolve()
 ## Physics constants
 FRICTION = 0.01  # Friction to apply on all entities
 ANGULAR_FRICTION = 0.01 # same as friction but for angles
-GRAVITY = 0.5   # Gravity constant
+GRAVITY = 50   # Gravity constant
 
 ## Player data
 PLAYER_WIDTH = 50
@@ -69,6 +70,11 @@ class ServerJoinPacket:
     servername: str
     serverip: str
     serverport: int
+
+@dataclass
+class ServerPacket:
+    terrain: List[int]
+    clients_data: Dict[str, ClientPacket]
 
 # Objects
 @dataclass
@@ -113,3 +119,26 @@ def CalculateScreenPosition(worldPosition: pygame.Vector2, playerPosition: pygam
         SCREEN_WIDTH // 2 + (worldPosition.x - playerPosition.x),
         SCREEN_HEIGHT // 2 + (worldPosition.y - playerPosition.y)
     )
+
+def lines_intersect(p1, p2, q1, q2):
+    """Returns True if the line segments (p1, p2) and (q1, q2) intersect."""
+    def ccw(a, b, c):
+        return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+    return ccw(p1, q1, q2) != ccw(p2, q1, q2) and ccw(p1, p2, q1) != ccw(p1, p2, q2)
+
+
+def line_rect_collision(line_start, line_end, rect):
+    """Check if a line segment from line_start to line_end intersects with a rectangle."""
+    # Check for collisions with each side of the rectangle (four edges)
+    rect_lines = [
+        (rect.topleft, rect.topright),
+        (rect.topright, rect.bottomright),
+        (rect.bottomright, rect.bottomleft),
+        (rect.bottomleft, rect.topleft)
+    ]
+
+    for rect_line_start, rect_line_end in rect_lines:
+        if lines_intersect(line_start, line_end, rect_line_start, rect_line_end):
+            return True
+    return False

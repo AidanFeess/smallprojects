@@ -3,6 +3,10 @@ import socket, threading, logging
 import struct, json
 import pygame
 
+from math import sin
+from random import uniform, randint
+from typing import List
+
 from GameConstants import *
 
 class NetworkServer():
@@ -24,7 +28,7 @@ class NetworkServer():
         self.all_client_data = {} # super hack way to do this, its 3 am
 
         # The 'entry message' sent to every client when they join the server.
-        self.entryMessage = self.serialize_server_data(
+        self.entryMessage = self.serialize_server_join_data(
             ServerJoinPacket(
                 servername=gameServer.serverName,
                 serverip=gameServer.serverIp,
@@ -121,6 +125,8 @@ class NetworkServer():
                 raw_length = self.recv_exact(clientSock, 4)
                 if not raw_length:
                     break  # Client disconnected
+                
+                serverPacket: ServerPacket
 
                 # Get the actual message length
                 message_length = struct.unpack('!I', raw_length)[0]
@@ -132,13 +138,23 @@ class NetworkServer():
 
                 # Deserialize the data
                 clientPacket = self.deserialize_client_data(rawClientPacket)
+
+                # Get the client data 
                 self.all_client_data[clientAddr[0]] = rawClientPacket
-                combined_data = json.dumps({
+                combined_data = (json.dumps({
                     addr: rawPacket.decode('utf-8') if rawPacket is not None and rawPacket != rawClientPacket else None 
                     for addr, rawPacket in self.all_client_data.items()
-                }) + "\n"
+                }) + "\n")
 
-                clientSock.sendall(combined_data.encode('utf-8'))
+                # create the return packet
+                serverPacket = self.serialize_server_data(
+                    ServerPacket(
+                        terrain=self.gameServer.terrain,
+                        clients_data=combined_data
+                    )
+                )
+
+                clientSock.sendall(serverPacket)
 
 
         except ConnectionResetError as e:
@@ -183,12 +199,19 @@ class NetworkServer():
         clientSock.close()
         self.logger.info(f"Client {clientAddr} disconnected and cleaned up.")
 
-    def serialize_server_data(self, packet: ServerJoinPacket) -> bytes:
+    def serialize_server_join_data(self, packet: ServerJoinPacket) -> bytes:
         # Convert the dataclass to a dictionary for JSON serialization
         data_dict = {
             "servername": packet.servername,
             "serverip": packet.serverip,
             "serverport": packet.serverport
+        }
+        return json.dumps(data_dict).encode('utf-8')
+    
+    def serialize_server_data(self, packet: ServerPacket) -> bytes:
+        data_dict = {
+            "terrain": packet.terrain,
+            "clients_data": packet.clients_data
         }
         return json.dumps(data_dict).encode('utf-8')
 
@@ -209,21 +232,35 @@ class NetworkServer():
 
 class GameServer():
     """
-    A gameserver that allows for the creation, deletion, and editing of objects
-    as well as the visualization of the game world if needed.
+    A gameserver that allows for the creation, deletion, and editing of objects.
     """
 
-    def __init__(self, serverName = "OfficialServer", serverIp = "127.0.0.1", serverPort = 44200, isVisual = False):
+    def __init__(self, serverName = "OfficialServer", serverIp = "127.0.0.1", serverPort = 44200):
         self.serverName = serverName
         self.serverIp = serverIp
         self.serverPort = serverPort
-        self.isVisual = isVisual
+        self.terrain = None
 
     def start(self):
+        self.terrain = self.generateTerrain(4000)
         self.networkServer = NetworkServer(self, self.serverIp, self.serverPort)
     
-    def visualizeGameData():
-        pass
+    def generateTerrain(self, width, Amplitude=10, Frequency=10, NoiseAmplitude=15) -> List[int]:
+        """
+        Generates 2D terrain using a modified sine wave and noise for variation.
+        
+        Explanation:
+        Finds the positions of points along the curve and returns them as an array
+        """
+        # A modified sine wave, basically:
+        # y = A * sin(kx + b) + noise(x)
+        wave = lambda x: Amplitude * sin(Frequency*x) + uniform(-NoiseAmplitude, NoiseAmplitude)
+        points = []
+
+        for x in range(0, width, 100):
+            points.append((x-width//2, round(wave(x), 3)))
+        
+        return points
 
 # Create and start the server
 newServer = GameServer(serverName="Test Server", serverIp="0.0.0.0")
