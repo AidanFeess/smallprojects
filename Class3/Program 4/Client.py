@@ -287,7 +287,7 @@ class GameClient():
             ))
 
             font = pygame.font.SysFont(None, 40)
-            text = font.render(self.username, True, BLACK)
+            text = font.render(client['username'], True, BLACK)
             text_rect = text.get_rect(center=(player.x + PLAYER_WIDTH//2, player.y - 20))
             screen.blit(text, text_rect)
 newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 0))
