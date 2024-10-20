@@ -25,6 +25,7 @@ class NetworkClient:
         self.connection = None
         self.connected = False
         self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 3
 
         # Connect to the server
         self.connect_to_server()
@@ -38,10 +39,9 @@ class NetworkClient:
         The main network loop runs in a separate thread, continuously sending
         and receiving data from the server.
         """
-        buffer = ""
         while self.connected:
             try:
-                # Create the packet before sending
+                # Send data to the server
                 newPacket = self.serialize_client_data(
                     ClientPacket(
                         username=self.gameClient.username,
@@ -49,20 +49,19 @@ class NetworkClient:
                         gameData=self.gameClient.gameData
                     )
                 )
-
-                # Send the packet with a length prefix
                 self.send_with_length_prefix(newPacket)
-                 # Receive data from the server
+
+                # Receive data from the server
                 rawdata = self.connection.recv(10240)
-                self.gameClient.server_data = self.deserialize_server_data(rawdata)
-
                 if not rawdata:
-                    break  # Server closed the connection
-                
-                time.sleep(0.01)  # send data every 100 ms
+                    raise ConnectionError("Server closed")
 
-            except (socket.error, OSError) as e:
-                print(f"Network error: {e}. Attempting to reconnect...")
+                self.gameClient.server_data = self.deserialize_server_data(rawdata)
+                time.sleep(0.01)  # Send data every 10 ms
+
+            except (socket.error, OSError, ConnectionError) as e:
+                print(f"Network error: {e}")
+                self.connected = False
                 self.reconnect_to_server()
 
     def connect_to_server(self):
@@ -91,20 +90,22 @@ class NetworkClient:
         """
         Attempts to reconnect to the server.
         """
-        while not self.connected and self.reconnect_attempts < 5:  # Try up to 5 reconnection attempts
+        while not self.connected and self.reconnect_attempts < self.max_reconnect_attempts:
             self.reconnect_attempts += 1
-
+            print(f"Reconnection attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}...")
             try:
-                time.sleep(2)  # Wait 2 seconds between attempts
-                if self.connect_to_server() == False:
+                time.sleep(2)  # Wait for 2 seconds before attempting to reconnect
+                self.connect_to_server()
+                if self.connected:
+                    self.reconnect_attempts = 0  # Reset attempts on successful reconnection
                     return
 
             except Exception as e:
                 print(f"Reconnect attempt failed: {e}")
 
-        if not self.connected:
-            print("Failed to reconnect after 5 attempts. Disconnecting.")
-            self.disconnect()
+        # If we reach max attempts, show a failure message
+        if not self.connected and self.reconnect_attempts >= self.max_reconnect_attempts:
+            self.gameClient.message = ServerMessage("Failed to reconnect to the server.")
 
     def disconnect(self):
         """
@@ -210,11 +211,14 @@ class GameClient():
         self.velocity = 5  # Horizontal movement speed
         self.velocity_y = 0  # Vertical velocity (gravity impact)
         self.grounded = False  # Is the player grounded?
+        self.movement_disabled = False
 
         self.connInfo = {
             "ip": None, 
             "port": None
         }
+
+        self.message: Optional[Message] = None  # Add message attribute for server messages like disconnects
 
         # Spawn the player 100 pixels above the ground
         self.spawn(400)
@@ -222,7 +226,20 @@ class GameClient():
     def connectToServer(self, ip: str = "127.0.0.1", port: int = 44200):
         """Creates a network client and attempts to connect to the given server"""
         self.connInfo["ip"], self.connInfo["port"] = ip, port
+        # Reset the message when joining a new server
+        self.message = None
         self.networkClient = NetworkClient(self, ip, port)
+
+
+    def logout(self):
+            """Resets the game state and disconnects from the server."""
+            self.position = pygame.Vector2(0, 0)
+            self.velocity = 5
+            self.velocity_y = 0
+            self.worldObjects = [] 
+            self.server_data = None 
+
+            self.disconnectFromServer()
 
     def connectionInfo(self) -> tuple[str, int]:
         """Returns the GameClient's server connection info"""
@@ -237,21 +254,38 @@ class GameClient():
         player_rect = pygame.Rect(SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2, PLAYER_WIDTH, PLAYER_HEIGHT)
         try:
             terrain = self.server_data.terrain
-
             self.grounded = False
 
             for i in range(len(terrain) - 1):
                 line_start = pygame.Vector2(terrain[i])
                 line_end = pygame.Vector2(terrain[i + 1])
 
-                # Adjust these to screen coordinates only for drawing or hit testing
+                # Convert to screen coordinates for collision detection
                 screen_line_start = CalculateScreenPosition(line_start, self.position)
                 screen_line_end = CalculateScreenPosition(line_end, self.position)
 
                 if line_rect_collision(screen_line_start, screen_line_end, player_rect):
-                    self.grounded = True
-                    self.velocity_y = 0  # Stop falling
-                    self.position.y = min(line_start.y, line_end.y) - PLAYER_HEIGHT // 2  # Snap player to world terrain
+                    # Calculate the slope
+                    slope = (line_end.y - line_start.y) / (line_end.x - line_start.x + 0.01)
+
+                    # Smooth player movement based on slope
+                    target_y = min(line_start.y, line_end.y) - PLAYER_HEIGHT // 2
+
+                    # Allow a small buffer for grounding to improve jump detection
+                    buffer = 5  # A small buffer of 5 pixels
+                    if self.position.y + buffer >= target_y:  
+                        self.grounded = True
+
+                    # Smooth snapping to ground
+                    self.position.y += (target_y - self.position.y) * 0.2
+
+                    # Adjust velocity based on slope (reduce gravity effect when climbing)
+                    if abs(slope) > 0:  # On a slope
+                        self.velocity_y = -self.velocity * slope * 0.5  # Adjust for slope
+
+                    # Stop falling when grounded
+                    if abs(self.position.y - target_y) < 1:  # Small tolerance to ensure proper grounding
+                        self.velocity_y = 0
                     return True
 
             return False
@@ -259,26 +293,54 @@ class GameClient():
             return False
 
     def apply_gravity(self, dt):
-        # Only apply gravity if the player is not grounded
         if not self.grounded:
-            self.velocity_y += GRAVITY * dt  # Apply gravity to vertical velocity
-
-        # Apply vertical movement based on velocity
-        self.position.y += self.velocity_y * dt
+            self.velocity_y += GRAVITY * dt
+            self.position.y += self.velocity_y * dt
+        else:
+            self.velocity_y = 0  # Reset vertical velocity if grounded
 
     def handleMovement(self, keys):
+        if self.movement_disabled:
+            return
+
         moveVector = pygame.Vector2(0, 0)
-        if keys[pygame.K_w]:
-            moveVector.y -= self.velocity  # Move up (decrease y)
-        if keys[pygame.K_s]:
-            moveVector.y += self.velocity  # Move down (increase y)
+        
+        # Horizontal movement
         if keys[pygame.K_a]:
             moveVector.x -= self.velocity  # Move left (decrease x)
         if keys[pygame.K_d]:
             moveVector.x += self.velocity  # Move right (increase x)
 
-        # Update the player's position
-        self.position += moveVector
+        # Update the player's position with movement boundaries
+        #TODO: Fix boundaries
+        self.position.x = max(-3000, min(3000, self.position.x + moveVector.x))
+
+        # Jumping logic
+        if keys[pygame.K_SPACE] and self.grounded:
+            self.velocity_y = -65 * self.velocity
+            self.grounded = False
+
+    def get_slope_factor(self):
+        """ Returns a factor between 0 (steep climb) and 1 (flat or downhill) """
+        player_rect = pygame.Rect(SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2, PLAYER_WIDTH, PLAYER_HEIGHT)
+        terrain = self.server_data.terrain
+        
+        for i in range(len(terrain) - 1):
+            line_start = pygame.Vector2(terrain[i])
+            line_end = pygame.Vector2(terrain[i + 1])
+
+            # Adjust these to screen coordinates for slope detection
+            screen_line_start = CalculateScreenPosition(line_start, self.position)
+            screen_line_end = CalculateScreenPosition(line_end, self.position)
+
+            # Check if the player is colliding with the current terrain segment
+            if line_rect_collision(screen_line_start, screen_line_end, player_rect):
+                slope = (line_end.y - line_start.y) / (line_end.x - line_start.x + 0.01)  # Avoid division by zero
+                if slope > 0:
+                    return max(0.2, 1 - abs(slope))  # Smooth climbing by reducing gravity effect
+                return 1  # Normal gravity on flat or downward terrain
+
+        return 1  # Default gravity effect
 
     def draw(self, screen):
         # always draw the player at 0,0 (center of screen, not actual 0,0). move world around player to emulate camera
@@ -310,12 +372,16 @@ class GameClient():
         try:
             terrain = self.server_data.terrain
             adjusted_points: List[pygame.Vector2] = [CalculateScreenPosition(pygame.Vector2(x, y), self.position) for x, y in terrain]
+            lowered_points = [pygame.Vector2(x+150, y+150) for x, y in adjusted_points]
             # basically draw the terrain to the bottom of the screen
             adjusted_points.append((adjusted_points[-1][0], SCREEN_HEIGHT))
             adjusted_points.append((adjusted_points[0][0], SCREEN_HEIGHT))
 
+            lowered_points.append((lowered_points[-1][0], SCREEN_HEIGHT))
+            lowered_points.append((lowered_points[0][0], SCREEN_HEIGHT))
 
-            pygame.draw.polygon(screen, (0, 200, 0), adjusted_points)
+            pygame.draw.polygon(screen, DARK_GREEN, adjusted_points)
+            pygame.draw.polygon(screen, DIRT_BROWN, lowered_points)
         except:
             pass
 
@@ -367,7 +433,50 @@ class GameClient():
         self.draw(screen)
         self.drawOtherClients(screen)
 
-newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 50))
+class Message(ABC):
+    """
+    Abstract base class for various in-game messages.
+    """
+    def __init__(self, message_text: str):
+        self.message_text = message_text
+
+    @abstractmethod
+    def display(self, screen):
+        pass
+
+class ServerMessage(Message):
+    """
+    Represents a message when the server closes or reconnection fails.
+    """
+    def __init__(self, message_text: str = "Server Closed!"):
+        super().__init__(message_text)
+
+    def display(self, screen):
+        font = pygame.font.SysFont(None, 60)
+        text = font.render(self.message_text, True, (255, 0, 0))
+        text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
+        screen.fill((0, 0, 0))  # Black background for the message
+        screen.blit(text, text_rect)
+
+        # Draw confirm button
+        button_rect = pygame.Rect(SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT // 2 + 50, 200, 50)
+        pygame.draw.rect(screen, (0, 0, 0), button_rect)
+        pygame.draw.rect(screen, (255, 255, 255), button_rect, 2)
+        button_text = font.render("Confirm", True, (255, 255, 255))
+        button_text_rect = button_text.get_rect(center=button_rect.center)
+        screen.blit(button_text, button_text_rect)
+
+        pygame.display.flip()
+
+        # Event handling for the confirm button
+        for event in pygame.event.get():
+            if event.type == pygame.MOUSEBUTTONDOWN and button_rect.collidepoint(event.pos):
+                # Return to main menu and disconnect
+                global current_scene
+                current_scene = MainMenu(screen)
+                newClient.disconnectFromServer()
+
+newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 0))
 
 ## Debug
 class Debugger:
@@ -582,38 +691,129 @@ class Scene(ABC):
 class Gameplay(Scene):
     def __init__(self, screen):
         super().__init__(screen)
+        self.paused = False
 
     def handle_click(self, position):
-        pass
+        # Check if the "Log Out" button is clicked
+        button_width = 220
+        button_height = 60
+        button_rect = pygame.Rect(SCREEN_WIDTH // 2 - button_width // 2, SCREEN_HEIGHT // 2 + 100, button_width, button_height)
+        if button_rect.collidepoint(position) and self.paused:
+            # Disconnect the client and return to the main menu
+            newClient.logout()
+            global current_scene
+            current_scene = MainMenu(self.screen)
 
     def render(self):
         global running
         global dt
 
+        # Check if there's a message (e.g., server closed)
+        if isinstance(newClient.message, ServerMessage):
+            # Display server closed message
+            newClient.message.display(self.screen)
+            return
+
+        # Continue normal game rendering if no message
         for event in pygame.event.get():
-            debugger.track_key_event(event)
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self.paused = not self.paused  # Toggle pause
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.handle_click(event.pos)
 
-        screen.fill(LIGHT_BLUE)
+        # Regular game rendering
+        self.screen.fill(LIGHT_BLUE)
 
-        newClient.update(screen, dt)
-        
-        debugger.display_debug_info(screen, (newClient.connectionInfo()[0], newClient.connectionInfo()[1]), newClient=newClient)
-        
-        pygame.display.flip()    
+        # Only update the player and game world if not paused
+        newClient.update(self.screen, dt)
+        debugger.display_debug_info(self.screen, (newClient.connectionInfo()[0], newClient.connectionInfo()[1]), newClient=newClient)
+
+        if self.paused:
+            newClient.movement_disabled = True
+            # Create a transparent gray overlay surface
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            overlay.set_alpha(128)  # Set transparency (0-255, where 255 is fully opaque)
+            overlay.fill((50, 50, 50))  # Gray color
+            self.screen.blit(overlay, (0, 0))  # Draw the transparent overlay over the game
+
+            # Draw pause menu
+            font = pygame.font.SysFont(None, 60)
+
+            # Move the button lower and increase size
+            button_width = 220
+            button_height = 60
+            button_rect = pygame.Rect(SCREEN_WIDTH // 2 - button_width // 2, SCREEN_HEIGHT // 2 + 100, button_width, button_height)
+
+            pygame.draw.rect(self.screen, (0, 0, 0), button_rect, border_radius=10)  # Black background with rounded corners
+            pygame.draw.rect(self.screen, (255, 255, 255), button_rect, 2, border_radius=10)  # White border with rounded corners
+            button_text = font.render("Log Out", True, (255, 255, 255))
+            button_text_rect = button_text.get_rect(center=button_rect.center)
+            self.screen.blit(button_text, button_text_rect)
+        else:
+            newClient.movement_disabled = False
+
+        pygame.display.flip()
         dt = clock.tick(60) / 1000
+
 
 class ServerSelect(Scene):
     def __init__(self, screen):
         super().__init__(screen)
+        self.username = ""  # Store username input
+        self.custom_server = ""  # Store custom server IP
+        self.active_input = None  # Tracks which input box is active ('username' or 'custom_server')
+        self.servers = []  # List of discovered servers
+        self.selected_server = None  # Selected server
+        self.lock = threading.Lock()  # Lock for managing server list updates
+
+        # Start asynchronous server discovery
+        discoverThread = threading.Thread(target=discover_servers_async, args=(self.servers, self.lock), daemon=True).start()
 
     def handle_click(self, position):
-        pass
+        # Input box positions
+        input_box = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.4, self.screen_width * 0.3, self.screen_height * 0.07)
+        custom_server_box = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.55, self.screen_width * 0.3, self.screen_height * 0.07)
+        join_button = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.75, self.screen_width * 0.3, self.screen_height * 0.08)
+        back_button = pygame.Rect(self.screen_width * 0.05, self.screen_height * 0.8, self.screen_width * 0.2, self.screen_height * 0.08)
+        add_server_button = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.65, self.screen_width * 0.3, self.screen_height * 0.08)
+
+        if input_box.collidepoint(position):
+            self.active_input = 'username'
+        elif custom_server_box.collidepoint(position):
+            self.active_input = 'custom_server'
+        else:
+            self.active_input = None  # No input box clicked
+
+        # Check if the back button is clicked
+        if back_button.collidepoint(position):
+            global current_scene
+            current_scene = MainMenu(self.screen)
+            return
+
+        # Handle join button click
+        if join_button.collidepoint(position) and self.selected_server:
+            serverIp = self.selected_server.split("\n")[1]
+            newClient.username = self.username
+            newClient.connectToServer(ip=serverIp)
+            current_scene = Gameplay(self.screen)
+            return
+
+        # Handle custom server addition
+        if add_server_button.collidepoint(position) and is_valid_ip(self.custom_server):
+            with self.lock:
+                self.servers.append(f"Custom Server\n{self.custom_server}")
+            self.custom_server = ""  # Clear input after adding the server
+
+        # Handle server selection
+        for i, server in enumerate(self.servers):
+            server_rect = pygame.Rect(self.screen_width * 0.05, self.screen_height * (0.2 + i * 0.1), self.screen_width * 0.4, self.screen_height * 0.08)
+            if server_rect.collidepoint(position):
+                self.selected_server = server
 
     def render(self):
         global running
-        global current_scene
 
         # Set up colors
         background_color = (30, 30, 30)
@@ -624,143 +824,88 @@ class ServerSelect(Scene):
         disabled_color = (128, 128, 128)
 
         # Get screen dimensions
-        screen_width, screen_height = screen.get_size()
+        screen_width, screen_height = self.screen.get_size()
 
         # Set up fonts
         font = pygame.font.Font(None, int(screen_height * 0.05))
         title_font = pygame.font.Font(None, int(screen_height * 0.07))
 
-        # Username entry box setup
+        # Username and custom server input boxes
         input_box = pygame.Rect(screen_width * 0.55, screen_height * 0.4, screen_width * 0.3, screen_height * 0.07)
         custom_server_box = pygame.Rect(screen_width * 0.55, screen_height * 0.55, screen_width * 0.3, screen_height * 0.07)
-        username = ""
-        custom_server = ""
 
-        # Discover live servers asynchronously
-        servers = []
-        selected_server = None
-        active = False
-        active_custom = False
-        loading = True
-        back_button = pygame.Rect(screen_width * 0.05, screen_height * 0.8, screen_width * 0.2, screen_height * 0.08)
+        self.screen.fill(background_color)
+
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.handle_click(event.pos)
+
+            elif event.type == pygame.KEYDOWN and self.active_input:
+                if event.key == pygame.K_BACKSPACE:
+                    if self.active_input == 'username':
+                        self.username = self.username[:-1]
+                    elif self.active_input == 'custom_server':
+                        self.custom_server = self.custom_server[:-1]
+                else:
+                    if event.unicode.isprintable():
+                        if self.active_input == 'username':
+                            self.username += event.unicode
+                        elif self.active_input == 'custom_server':
+                            self.custom_server += event.unicode
+
+        # Draw server list
+        title_text = title_font.render("Available Servers", True, text_color)
+        self.screen.blit(title_text, (screen_width * 0.05, screen_height * 0.1))
+
+        with self.lock:
+            for i, server in enumerate(self.servers):
+                server_rect = pygame.Rect(screen_width * 0.05, screen_height * (0.2 + i * 0.1), screen_width * 0.4, screen_height * 0.08)
+                pygame.draw.rect(self.screen, button_hover_color if self.selected_server == server else button_color, server_rect)
+                server_name = server.split("\n")[0]
+                server_text = font.render(server_name, True, text_color)
+                self.screen.blit(server_text, (server_rect.x + 10, server_rect.y + 10))
+
+        # Draw Join button
         join_button = pygame.Rect(screen_width * 0.55, screen_height * 0.75, screen_width * 0.3, screen_height * 0.08)
+        if self.selected_server:
+            pygame.draw.rect(self.screen, button_color, join_button)
+        else:
+            pygame.draw.rect(self.screen, disabled_color, join_button)
+        join_text = font.render("Join", True, text_color)
+        self.screen.blit(join_text, join_button.move((join_button.width - join_text.get_width()) // 2, (join_button.height - join_text.get_height()) // 2))
+
+        # Draw Back button
+        back_button = pygame.Rect(screen_width * 0.05, screen_height * 0.8, screen_width * 0.2, screen_height * 0.08)
+        pygame.draw.rect(self.screen, button_color, back_button)
+        back_text = font.render("Back", True, text_color)
+        self.screen.blit(back_text, back_button.move((back_button.width - back_text.get_width()) // 2, (back_button.height - back_text.get_height()) // 2))
+
+        # Draw username input box
+        username_label = font.render("Enter Username:", True, text_color)
+        self.screen.blit(username_label, (screen_width * 0.55, screen_height * 0.35))
+        pygame.draw.rect(self.screen, input_box_color, input_box, 2 if self.active_input == 'username' else 1)
+        username_surface = font.render(self.username, True, text_color)
+        self.screen.blit(username_surface, (input_box.x + 10, input_box.y + 10))
+
+        # Draw custom server input box
+        custom_server_label = font.render("Custom Server IP:", True, text_color)
+        self.screen.blit(custom_server_label, (screen_width * 0.55, screen_height * 0.5))
+        pygame.draw.rect(self.screen, input_box_color, custom_server_box, 2 if self.active_input == 'custom_server' else 1)
+        custom_server_surface = font.render(self.custom_server, True, text_color)
+        self.screen.blit(custom_server_surface, (custom_server_box.x + 10, custom_server_box.y + 10))
+
+        # Draw Add Custom Server button
         add_server_button = pygame.Rect(screen_width * 0.55, screen_height * 0.65, screen_width * 0.3, screen_height * 0.08)
-
-        # Lock for managing server list thread
-        lock = threading.Lock()
-
-        # Start the asynchronous server discovery
-        discoverThread: threading.Thread = threading.Thread(target=discover_servers_async, args=(servers, lock), daemon=True).start()
-
-        # Main loop
-        while running:
-            screen.fill(background_color)
-
-            # Event handling
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    if back_button.collidepoint(event.pos):
-                        current_scene = MainMenu(screen)
-                        return
-                    elif input_box.collidepoint(event.pos):
-                        active = True
-                        active_custom = False
-                    elif custom_server_box.collidepoint(event.pos):
-                        active_custom = True
-                        active = False
-                    else:
-                        active = False
-                        active_custom = False
-
-                    # Handle server selection
-                    for i, server in enumerate(servers):
-                        server_rect = pygame.Rect(screen_width * 0.05, screen_height * (0.2 + i * 0.1), screen_width * 0.4, screen_height * 0.08)
-                        if server_rect.collidepoint(event.pos):
-                            selected_server = server
-
-                    # Handle join button click
-                    if join_button.collidepoint(event.pos) and selected_server:
-                        serverIp = str.split(selected_server, "\n")[1]
-                        newClient.username = username
-                        newClient.connectToServer(ip=serverIp)
-                        current_scene = Gameplay(screen)
-                        return
-
-                    # Handle custom server addition
-                    if add_server_button.collidepoint(event.pos) and is_valid_ip(custom_server):
-                        servers.append(f"Custom Server\n{custom_server}")
-                        custom_server = ""  # Clear the input after adding the server
-
-                elif event.type == pygame.KEYDOWN:
-                    if active:
-                        if event.key == pygame.K_RETURN:
-                            active = False
-                        elif event.key == pygame.K_BACKSPACE:
-                            username = username[:-1]
-                        else:
-                            username += event.unicode
-                    elif active_custom:
-                        if event.key == pygame.K_RETURN:
-                            active_custom = False
-                        elif event.key == pygame.K_BACKSPACE:
-                            custom_server = custom_server[:-1]
-                        else:
-                            custom_server += event.unicode
-
-            # Draw live server list
-            title_text = title_font.render("Available Servers", True, text_color)
-            screen.blit(title_text, (screen_width * 0.05, screen_height * 0.1))
-
-            with lock:
-                for i, server in enumerate(servers):
-                    server_rect = pygame.Rect(screen_width * 0.05, screen_height * (0.2 + i * 0.1), screen_width * 0.4, screen_height * 0.08)
-                    pygame.draw.rect(screen, button_hover_color if selected_server == server else button_color, server_rect)
-                    serverName = str.split(server, "\n")[0]
-                    server_text = font.render(serverName, True, text_color)
-                    screen.blit(server_text, (server_rect.x + 10, server_rect.y + 10))
-
-            # Draw the join button
-            if selected_server:
-                pygame.draw.rect(screen, button_color, join_button)
-            else:
-                pygame.draw.rect(screen, disabled_color, join_button)
-
-            # Draw username input
-            username_label = font.render("Enter Username:", True, text_color)
-            screen.blit(username_label, (screen_width * 0.55, screen_height * 0.35))
-
-            # Draw input box for username
-            pygame.draw.rect(screen, input_box_color, input_box, 2 if active else 1)
-            username_surface = font.render(username, True, text_color)
-            screen.blit(username_surface, (input_box.x + 10, input_box.y + 10))
-
-            # Draw input box for custom server
-            custom_server_label = font.render("Custom Server IP:", True, text_color)
-            screen.blit(custom_server_label, (screen_width * 0.55, screen_height * 0.5))
-            pygame.draw.rect(screen, input_box_color, custom_server_box, 2 if active_custom else 1)
-            custom_server_surface = font.render(custom_server, True, text_color)
-            screen.blit(custom_server_surface, (custom_server_box.x + 10, custom_server_box.y + 10))
-
-            # Draw add server button
-            if is_valid_ip(custom_server):
-                pygame.draw.rect(screen, button_color, add_server_button)
-            else:
-                pygame.draw.rect(screen, disabled_color, add_server_button)
-            add_server_text = font.render("Add Custom Server", True, text_color)
-            screen.blit(add_server_text, add_server_button.move((add_server_button.width - add_server_text.get_width()) // 2, (add_server_button.height - add_server_text.get_height()) // 2))
-
-            # Draw join and back buttons
-            join_text = font.render("Join", True, text_color)
-            screen.blit(join_text, join_button.move((join_button.width - join_text.get_width()) // 2, (join_button.height - join_text.get_height()) // 2))
-
-            pygame.draw.rect(screen, button_color, back_button)
-            back_text = font.render("Back", True, text_color)
-            screen.blit(back_text, back_button.move((back_button.width - back_text.get_width()) // 2, (back_button.height - back_text.get_height()) // 2))
-
-            # Update the display
-            pygame.display.flip()
+        if is_valid_ip(self.custom_server):
+            pygame.draw.rect(self.screen, button_color, add_server_button)
+        else:
+            pygame.draw.rect(self.screen, disabled_color, add_server_button)
+        add_server_text = font.render("Add Custom Server", True, text_color)
+        self.screen.blit(add_server_text, add_server_button.move((add_server_button.width - add_server_text.get_width()) // 2, (add_server_button.height - add_server_text.get_height()) // 2))
 
 class MainMenu(Scene):
     def __init__(self, screen):
@@ -822,9 +967,6 @@ class MainMenu(Scene):
         # Draw button text (centered on button)
         button_text_rect = server_select_text.get_rect(center=server_select_rect.center)
         screen.blit(server_select_text, button_text_rect)
-
-        # Update the display
-        pygame.display.flip()
         
 current_scene = MainMenu(screen)
 

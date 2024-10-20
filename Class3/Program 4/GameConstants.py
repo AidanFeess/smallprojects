@@ -26,6 +26,8 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 LIGHT_BLUE = (135, 206, 235)
+DARK_GREEN = (19, 109, 21)
+DIRT_BROWN = (43, 24, 12)
 
 COLORS = [WHITE, BLACK, RED, GREEN, BLUE]
 
@@ -38,13 +40,11 @@ ABSSERVERDATADIR = SERVERDATADIR.resolve()
 
 ## Physics constants
 FRICTION = 0.01  # Friction to apply on all entities
-ANGULAR_FRICTION = 0.01 # same as friction but for angles
-GRAVITY = 50   # Gravity constant
+GRAVITY = 400   # Gravity constant
 
 ## Player data
 PLAYER_WIDTH = 50
 PLAYER_HEIGHT = 50
-MAX_ANGULAR_VELOCITY = 1
 
 ## Some dataclasses to make it clearer what is being sent between the client and server
 

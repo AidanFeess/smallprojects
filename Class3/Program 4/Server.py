@@ -242,7 +242,7 @@ class GameServer():
         self.terrain = None
 
     def start(self):
-        self.terrain = self.generateTerrain(4000)
+        self.terrain = self.generateTerrain(8000)
         self.networkServer = NetworkServer(self, self.serverIp, self.serverPort)
     
     def generateTerrain(self, width, Amplitude=10, Frequency=10, NoiseAmplitude=15) -> List[int]:
