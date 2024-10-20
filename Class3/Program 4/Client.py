@@ -171,7 +171,6 @@ def discover_servers_async(servers, lock, port=44200, timeout=3):
     try:
         while pygame.time.get_ticks() - start_time < timeout * 1000:
             try:
-                print('greg')
                 response, serveraddress = client_sock.recvfrom(1024)
                 with lock:
                     servers.append(response.decode('utf-8'))
@@ -245,7 +244,13 @@ class GameClient():
 
     def draw(self, screen):
         # always draw the player at 0,0 (center of screen, not actual 0,0). move world around player to emulate camera
-        pygame.draw.rect(screen, BLUE, pygame.Rect(SCREEN_WIDTH//2 - PLAYER_WIDTH//2, SCREEN_HEIGHT//2 - PLAYER_HEIGHT//2, PLAYER_WIDTH, PLAYER_HEIGHT))
+        player = pygame.draw.rect(screen, BLUE, pygame.Rect(SCREEN_WIDTH//2 - PLAYER_WIDTH//2, SCREEN_HEIGHT//2 - PLAYER_HEIGHT//2, PLAYER_WIDTH, PLAYER_HEIGHT))
+
+        # render the player's name above the player
+        font = pygame.font.SysFont(None, 40)
+        text = font.render(self.username, True, BLACK)
+        text_rect = text.get_rect(center=(player.x + PLAYER_WIDTH//2, player.y - 20))
+        screen.blit(text, text_rect)
 
     def drawWorldObjects(self, screen):
         for obj in self.worldObjects:
@@ -308,14 +313,98 @@ class Debugger:
         self.last_ping: Optional[str] = None
         self.ping_interval = 2.0
         self.last_ping_time = 0
-        
-        # Client tracking
-        self.connected_clients: Dict[str, ClientInfo] = {}
-        self.client_timeout = 5.0  # Seconds before considering a client disconnected
     
-    def toggle_debug(self) -> None:
-        """Toggle debug overlay visibility"""
-        self.show_debug = not self.show_debug
+    def ping_server(self, hostname: str, port: int) -> str:
+        """Ping server and return latency in milliseconds"""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
+
+            start_time = time.time()
+            s.connect((hostname, port))
+            s.close()
+
+            ping_ms = (time.time() - start_time) * 1000
+            self.last_ping = str(round(ping_ms))
+            return self.last_ping
+        except socket.error as e:
+            print(f"Failed to ping {hostname}:{port}, Error: {e}")
+            return None
+    
+    def update_ping(self, hostname: str, port: int) -> None:
+        """Update ping if enough time has passed"""
+        current_time = time.time()
+        if current_time - self.last_ping_time >= self.ping_interval:
+            self.ping_server(hostname, port)
+            self.last_ping_time = current_time
+    
+    def display_debug_info(self, screen: pygame.Surface, server_info: Tuple[str, int], newClient) -> None:
+        """Display debug overlay with various metrics and connected clients"""
+        if not self.show_debug:
+            return
+        
+        # Update ping
+        self.update_ping(server_info[0], server_info[1])
+        
+        # Calculate metrics
+        current_fps = self.update_fps()
+        
+        # Left side - General debug info
+        debug_lines = [
+            f"FPS: {current_fps:.1f}",
+            f"Ping: {self.last_ping}ms" if self.last_ping else "Ping: N/A",
+            f"Server: {server_info[0]}:{server_info[1]}",
+        ]
+        
+        # Draw left side debug information
+        y_offset = 10
+        for line in debug_lines:
+            text_surface = self.font.render(line, True, self.text_color)
+            screen.blit(text_surface, (10, y_offset))
+            y_offset += self.font_size
+        
+        # Right side - Connected clients
+        x_offset = screen.get_width() - 300
+        y_offset = 10
+        
+        # Header
+        client_header = self.font.render("Connected Clients:", True, self.text_color)
+        screen.blit(client_header, (x_offset, y_offset))
+        y_offset += self.font_size * 1.5
+        
+        # Display connected clients from newClient.allClients
+        try:
+            for client_ip, client_data_str in newClient.allClients.items():
+                try:
+                    if not client_data_str:
+                        continue
+                    client_data = json.loads(client_data_str)
+                    username = client_data.get('username', 'Unknown')
+                    print(client_data)
+                    
+                    # Display client info
+                    client_lines = [
+                        f"User: {username}",
+                        f"IP: {client_ip}",
+                        "---"
+                    ]
+                    
+                    for line in client_lines:
+                        text_surface = self.font.render(line, True, self.text_color)
+                        screen.blit(text_surface, (x_offset, y_offset))
+                        y_offset += self.font_size
+                    
+                    # Add spacing between clients
+                    y_offset += self.font_size // 2
+                    
+                except json.JSONDecodeError:
+                    print(f"Failed to parse client data for {client_ip}")
+                    continue
+                
+        except AttributeError:
+            # Handle case where allClients might not be available
+            error_text = self.font.render("No client data available", True, self.text_color)
+            screen.blit(error_text, (x_offset, y_offset))
     
     def update_fps(self) -> float:
         """Update and return current FPS"""
@@ -328,6 +417,10 @@ class Debugger:
             self.fps_samples.append(fps)
         
         return sum(self.fps_samples) / len(self.fps_samples) if self.fps_samples else 0
+    
+    def toggle_debug(self) -> None:
+        """Toggle debug overlay visibility"""
+        self.show_debug = not self.show_debug
     
     def track_key_event(self, event: pygame.event.Event) -> None:
         """Track key press/release events and durations"""
@@ -361,122 +454,6 @@ class Debugger:
         while len(self.key_history) > self.max_key_history:
             self.key_history.pop(0)
     
-    def ping_server(self, hostname: str, port: int) -> str:
-        """Ping server using UDP and return latency in milliseconds without establishing a full connection."""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(.1)
-
-            start_time = time.time()
-            # Send a small, empty packet to the server using UDP
-            s.sendto(b'', (hostname, port))
-            
-            try:
-                # Receive data back (if server responds)
-                s.recvfrom(1024)
-            except socket.timeout:
-                # If no response, it's still a valid ping, we're only measuring time
-                pass
-
-            ping_ms = (time.time() - start_time) * 1000
-            self.last_ping = str(round(ping_ms))
-            return self.last_ping
-        except socket.error as e:
-            print(f"Failed to ping {hostname}:{port}, Error: {e}")
-            return None
-    
-    def update_ping(self, hostname: str, port: int) -> None:
-        """Update ping if enough time has passed"""
-        current_time = time.time()
-        if current_time - self.last_ping_time >= self.ping_interval:
-            self.ping_server(hostname, port)
-            self.last_ping_time = current_time
-
-    def update_client_info(self, client_id: str, username: str, position: Tuple[float, float], 
-                          ping: Optional[float] = None, hp: Optional[int] = None,
-                          additional_info: Dict = None) -> None:
-        """Update information about a connected client"""
-        self.connected_clients[client_id] = ClientInfo(
-            username=username,
-            position=position,
-            last_update=time.time(),
-            ping=ping,
-            hp=hp,
-            additional_info=additional_info or {}
-        )
-    
-    def cleanup_disconnected_clients(self) -> None:
-        """Remove clients that haven't been updated recently"""
-        current_time = time.time()
-        disconnected = [
-            client_id for client_id, client in self.connected_clients.items()
-            if current_time - client.last_update > self.client_timeout
-        ]
-        for client_id in disconnected:
-            del self.connected_clients[client_id]
-    
-    def display_debug_info(self, screen: pygame.Surface, server_info: Tuple[str, int]) -> None:
-        """Display debug overlay with various metrics"""
-        if not self.show_debug:
-            return
-        
-        # Update ping and cleanup old clients
-        self.update_ping(server_info[0], server_info[1])
-        self.cleanup_disconnected_clients()
-        
-        # Calculate metrics
-        current_fps = self.update_fps()
-        
-        # Left side - General debug info
-        debug_lines = [
-            f"FPS: {current_fps:.1f}",
-            f"Ping: {self.last_ping}ms" if self.last_ping else "Ping: N/A",
-            f"Server: {server_info[0]}:{server_info[1]}",
-            "",
-            "Recent Key Events:"
-        ]
-        
-        # Add recent key events
-        for key, action, timestamp in reversed(self.key_history[-5:]):
-            key_name = pygame.key.name(key)
-            time_ago = time.time() - timestamp
-            debug_lines.append(f"{key_name} {action} ({time_ago:.1f}s ago)")
-        
-        # Draw left side debug information
-        y_offset = 10
-        for line in debug_lines:
-            text_surface = self.font.render(line, True, self.text_color)
-            screen.blit(text_surface, (10, y_offset))
-            y_offset += self.font_size
-        
-        # Right side - Connected clients
-        x_offset = screen.get_width() - 300
-        y_offset = 10
-        
-        # Header
-        client_header = self.font.render("Connected Clients:", True, self.text_color)
-        screen.blit(client_header, (x_offset, y_offset))
-        y_offset += self.font_size * 1.5
-        
-        # Display each client's info
-        for client_id, client in self.connected_clients.items():
-            client_lines = [
-                f"User: {client.username}",
-                f"Pos: ({client.position[0]:.1f}, {client.position[1]:.1f})",
-                f"Ping: {client.ping}ms" if client.ping else "Ping: N/A",
-                f"HP: {client.hp}" if client.hp is not None else "",
-                "---"
-            ]
-            
-            for line in client_lines:
-                if line:  # Only render non-empty lines
-                    text_surface = self.font.render(line, True, self.text_color)
-                    screen.blit(text_surface, (x_offset, y_offset))
-                    y_offset += self.font_size
-            
-            # Add spacing between clients
-            y_offset += self.font_size // 2
-    
     def get_active_keys(self) -> List[str]:
         """Return list of currently held keys"""
         return [pygame.key.name(key) for key, state in self.key_states.items() 
@@ -485,10 +462,6 @@ class Debugger:
     def get_key_stats(self, key: int) -> Optional[DebugKeyState]:
         """Get detailed stats for a specific key"""
         return self.key_states.get(key)
-
-    def get_connected_clients(self) -> Dict[str, ClientInfo]:
-        """Return dictionary of connected clients"""
-        return self.connected_clients.copy()
     
 ## Pygame setup
 pygame.init()
@@ -517,7 +490,8 @@ def display_game(screen):
         newClient.draw(screen) # Draw the client on top (probably needs some more advanced stuff later for layering)
         newClient.renderOtherClients(screen)
         
-        debugger.display_debug_info(screen, (newClient.connectionInfo()[0], newClient.connectionInfo()[1]))
+        debugger.connected_clients = newClient.allClients
+        debugger.display_debug_info(screen, (newClient.connectionInfo()[0], newClient.connectionInfo()[1]), newClient=newClient)
         
         pygame.display.flip()    
         dt = clock.tick(60) / 1000
@@ -597,6 +571,7 @@ def display_server_select(screen):
                 # Handle join button click
                 if join_button.collidepoint(event.pos) and selected_server:
                     serverIp = str.split(selected_server, "\n")[1]
+                    newClient.username = username
                     newClient.connectToServer(ip=serverIp)
                     display_game(screen)
                     return
