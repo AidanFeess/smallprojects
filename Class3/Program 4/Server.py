@@ -67,7 +67,7 @@ class NetworkServer():
         self.clientThread.start()
 
         try:
-            self.logger.info("Server started")
+            self.logger.info(f"Server started on {socket.gethostbyname(socket.gethostname())}:{self.gameServer.serverPort}")
             while not self.shutdown_event.is_set():  # Main server loop checks shutdown event
                 self.check_for_discovery_request() # also using it to check for discovery requests
                 self.shutdown_event.wait(1)  # Wait for 1 second, then re-check if shutdown is requested
@@ -226,5 +226,5 @@ class GameServer():
         pass
 
 # Create and start the server
-newServer = GameServer(serverIp="0.0.0.0")
+newServer = GameServer(serverName="TestServer", serverIp="0.0.0.0")
 newServer.start()
