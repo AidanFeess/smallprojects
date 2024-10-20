@@ -10,7 +10,8 @@
 # import libraries that you will need
 from dataclasses import dataclass
 from pathlib import Path
-import pygame, io
+from typing import *
+import pygame
 
 GAME_NAME = "Iron Tide: 1944"
 
@@ -85,8 +86,29 @@ class WorldObject:
     objectType: ObjectType
     sprite: pygame.sprite = None
 
+# Debug
+@dataclass
+class DebugKeyState:
+    """Tracks the state and history of a key press"""
+    is_pressed: bool
+    press_time: float
+    release_time: float
+    hold_duration: float
+    press_count: int
+
+@dataclass
+class ClientInfo:
+    """Stores information about connected clients"""
+    username: str
+    position: Tuple[float, float]
+    last_update: float
+    ping: Optional[float] = None
+    hp: Optional[int] = None
+    additional_info: Dict = None
+
 # Helper functions
 def ConvertBasicToWorldPosition(basic: pygame.Vector2) -> pygame.Vector2:
+    
     '''
     Converts a basic pygame position to a world position, beginning from the center of the screen.
     '''

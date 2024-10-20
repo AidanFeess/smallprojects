@@ -2,6 +2,9 @@ import socket, struct
 import threading, json, time, re
 import pygame
 
+from typing import Dict, Optional, List, Tuple
+from collections import deque
+
 from GameConstants import *
 ## Networking functions and classes
 class NetworkClient:
@@ -279,54 +282,213 @@ class GameClient():
 newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 0))
 
 ## Debug
-def ping_server(hostname, port) -> str:
-    try:
-        # Create a TCP/IP socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2)  # Set a timeout of 2 seconds
-
-        start_time = time.time()  # Record the current time
-        s.connect((hostname, port))  # Connect to the server
-        s.close()  # Close the connection after success
-
-        end_time = time.time()  # Record the time after connection
-
-        # Calculate the difference in time and convert to milliseconds
-        ping_ms = (end_time - start_time) * 1000
-        return str(round(ping_ms))
-    except socket.error as e:
-        print(f"Failed to ping {hostname}:{port}, Error: {e}")
-        return None
-
-def displayDebugInfo(screen):
-    """Function for displaying debug info while in game."""
-    font_size = 24
-    font = pygame.font.Font(None, font_size)
-    text_color = (128, 128, 128)
-
-    # ping
-    client_server_info: tuple = newClient.connectionInfo()
-    ping = ping_server(client_server_info[0], client_server_info[1])
-    if ping:
-        ping_surf = font.render(f"ping: {ping}ms", True, text_color)
-        ping_rect = ping_surf.get_rect()
-        ping_rect.x = 10
-        ping_rect.y = screen.get_height() - ping_rect.height - 35
-        screen.blit(ping_surf, ping_rect)
+class Debugger:
+    def __init__(self, max_fps_samples: int = 60):
+        # Initialize debug state
+        self.show_debug = True
+        self.font_size = 24
+        self.font = pygame.font.Font(None, self.font_size)
+        self.text_color = (128, 128, 128)
+        
+        # FPS tracking
+        self.fps_samples = deque(maxlen=max_fps_samples)
+        self.last_time = time.time()
+        
+        # Key tracking
+        self.key_states: Dict[int, DebugKeyState] = {}
+        self.key_history: List[Tuple[int, str, float]] = []
+        self.max_key_history = 10
+        
+        # Performance metrics
+        self.frame_times = deque(maxlen=60)
+        self.last_frame_time = time.time()
+        
+        # Network metrics
+        self.last_ping: Optional[str] = None
+        self.ping_interval = 2.0
+        self.last_ping_time = 0
+        
+        # Client tracking
+        self.connected_clients: Dict[str, ClientInfo] = {}
+        self.client_timeout = 5.0  # Seconds before considering a client disconnected
     
-    # server conn info
-    conn_surf = font.render(f"server ip: {client_server_info[0]}", True, text_color)
-    conn_rect = ping_surf.get_rect()
-    conn_rect.x = 10
-    conn_rect.y = screen.get_height() - conn_rect.height - 15
-    screen.blit(conn_surf, conn_rect)
+    def toggle_debug(self) -> None:
+        """Toggle debug overlay visibility"""
+        self.show_debug = not self.show_debug
+    
+    def update_fps(self) -> float:
+        """Update and return current FPS"""
+        current_time = time.time()
+        dt = current_time - self.last_time
+        self.last_time = current_time
+        
+        if dt > 0:
+            fps = 1.0 / dt
+            self.fps_samples.append(fps)
+        
+        return sum(self.fps_samples) / len(self.fps_samples) if self.fps_samples else 0
+    
+    def track_key_event(self, event: pygame.event.Event) -> None:
+        """Track key press/release events and durations"""
+        current_time = time.time()
+        
+        if event.type == pygame.KEYDOWN:
+            if event.key not in self.key_states:
+                self.key_states[event.key] = DebugKeyState(
+                    is_pressed=True,
+                    press_time=current_time,
+                    release_time=0,
+                    hold_duration=0,
+                    press_count=1
+                )
+            else:
+                self.key_states[event.key].is_pressed = True
+                self.key_states[event.key].press_time = current_time
+                self.key_states[event.key].press_count += 1
+            
+            self.key_history.append((event.key, "pressed", current_time))
+        
+        elif event.type == pygame.KEYUP:
+            if event.key in self.key_states:
+                state = self.key_states[event.key]
+                state.is_pressed = False
+                state.release_time = current_time
+                state.hold_duration = current_time - state.press_time
+            
+            self.key_history.append((event.key, "released", current_time))
+        
+        while len(self.key_history) > self.max_key_history:
+            self.key_history.pop(0)
+    
+    def ping_server(self, hostname: str, port: int) -> str:
+        """Ping server and return latency in milliseconds"""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
 
+            start_time = time.time()
+            s.connect((hostname, port))
+            s.close()
+
+            ping_ms = (time.time() - start_time) * 1000
+            self.last_ping = str(round(ping_ms))
+            return self.last_ping
+        except socket.error as e:
+            print(f"Failed to ping {hostname}:{port}, Error: {e}")
+            return None
+    
+    def update_ping(self, hostname: str, port: int) -> None:
+        """Update ping if enough time has passed"""
+        current_time = time.time()
+        if current_time - self.last_ping_time >= self.ping_interval:
+            self.ping_server(hostname, port)
+            self.last_ping_time = current_time
+
+    def update_client_info(self, client_id: str, username: str, position: Tuple[float, float], 
+                          ping: Optional[float] = None, hp: Optional[int] = None,
+                          additional_info: Dict = None) -> None:
+        """Update information about a connected client"""
+        self.connected_clients[client_id] = ClientInfo(
+            username=username,
+            position=position,
+            last_update=time.time(),
+            ping=ping,
+            hp=hp,
+            additional_info=additional_info or {}
+        )
+    
+    def cleanup_disconnected_clients(self) -> None:
+        """Remove clients that haven't been updated recently"""
+        current_time = time.time()
+        disconnected = [
+            client_id for client_id, client in self.connected_clients.items()
+            if current_time - client.last_update > self.client_timeout
+        ]
+        for client_id in disconnected:
+            del self.connected_clients[client_id]
+    
+    def display_debug_info(self, screen: pygame.Surface, server_info: Tuple[str, int]) -> None:
+        """Display debug overlay with various metrics"""
+        if not self.show_debug:
+            return
+        
+        # Update ping and cleanup old clients
+        self.update_ping(server_info[0], server_info[1])
+        self.cleanup_disconnected_clients()
+        
+        # Calculate metrics
+        current_fps = self.update_fps()
+        
+        # Left side - General debug info
+        debug_lines = [
+            f"FPS: {current_fps:.1f}",
+            f"Ping: {self.last_ping}ms" if self.last_ping else "Ping: N/A",
+            f"Server: {server_info[0]}:{server_info[1]}",
+            "",
+            "Recent Key Events:"
+        ]
+        
+        # Add recent key events
+        for key, action, timestamp in reversed(self.key_history[-5:]):
+            key_name = pygame.key.name(key)
+            time_ago = time.time() - timestamp
+            debug_lines.append(f"{key_name} {action} ({time_ago:.1f}s ago)")
+        
+        # Draw left side debug information
+        y_offset = 10
+        for line in debug_lines:
+            text_surface = self.font.render(line, True, self.text_color)
+            screen.blit(text_surface, (10, y_offset))
+            y_offset += self.font_size
+        
+        # Right side - Connected clients
+        x_offset = screen.get_width() - 300
+        y_offset = 10
+        
+        # Header
+        client_header = self.font.render("Connected Clients:", True, self.text_color)
+        screen.blit(client_header, (x_offset, y_offset))
+        y_offset += self.font_size * 1.5
+        
+        # Display each client's info
+        for client_id, client in self.connected_clients.items():
+            client_lines = [
+                f"User: {client.username}",
+                f"Pos: ({client.position[0]:.1f}, {client.position[1]:.1f})",
+                f"Ping: {client.ping}ms" if client.ping else "Ping: N/A",
+                f"HP: {client.hp}" if client.hp is not None else "",
+                "---"
+            ]
+            
+            for line in client_lines:
+                if line:  # Only render non-empty lines
+                    text_surface = self.font.render(line, True, self.text_color)
+                    screen.blit(text_surface, (x_offset, y_offset))
+                    y_offset += self.font_size
+            
+            # Add spacing between clients
+            y_offset += self.font_size // 2
+    
+    def get_active_keys(self) -> List[str]:
+        """Return list of currently held keys"""
+        return [pygame.key.name(key) for key, state in self.key_states.items() 
+                if state.is_pressed]
+    
+    def get_key_stats(self, key: int) -> Optional[DebugKeyState]:
+        """Get detailed stats for a specific key"""
+        return self.key_states.get(key)
+
+    def get_connected_clients(self) -> Dict[str, ClientInfo]:
+        """Return dictionary of connected clients"""
+        return self.connected_clients.copy()
+    
 ## Pygame setup
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 clock = pygame.time.Clock()
 running = True
 dt = 0
+debugger = Debugger()
 
 ## Pygame Functions
 def display_game(screen):
@@ -334,6 +496,7 @@ def display_game(screen):
 
     while running:
         for event in pygame.event.get():
+            debugger.track_key_event(event)
             if event.type == pygame.QUIT:
                 running = False
 
@@ -344,8 +507,9 @@ def display_game(screen):
         newClient.drawWorldObjects(screen)
         newClient.draw(screen) # Draw the client on top (probably needs some more advanced stuff later for layering)
         newClient.renderOtherClients(screen)
-        displayDebugInfo(screen)
-
+        
+        debugger.display_debug_info(screen, (newClient.connectionInfo()[0], newClient.connectionInfo()[1]))
+        
         pygame.display.flip()    
         dt = clock.tick(60) / 1000
 
