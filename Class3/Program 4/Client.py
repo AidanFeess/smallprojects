@@ -280,11 +280,16 @@ class GameClient():
             screenPosition = CalculateScreenPosition(pygame.Vector2(clientPosition['x'], clientPosition['y']), self.position)
 
             # Draw the other client's representation (e.g., a rectangle)
-            pygame.draw.rect(screen, GREEN, (
+            player = pygame.draw.rect(screen, GREEN, (
                 screenPosition.x - PLAYER_WIDTH // 2,  # X coordinate
                 screenPosition.y - PLAYER_HEIGHT // 2,  # Y coordinate
                 PLAYER_WIDTH, PLAYER_HEIGHT  # Width and Height of the client rectangle
             ))
+
+            font = pygame.font.SysFont(None, 40)
+            text = font.render(self.username, True, BLACK)
+            text_rect = text.get_rect(center=(player.x + PLAYER_WIDTH//2, player.y - 20))
+            screen.blit(text, text_rect)
 newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 0))
 
 ## Debug
