@@ -1,0 +1,161 @@
+INFO 10/22/2024 11:12:12 AM | Server initialized
+INFO 10/22/2024 11:12:12 AM | Server started on 192.168.0.51:44200
+INFO 10/22/2024 11:13:30 AM | Client ('192.168.0.51', 49057) connected.
+INFO 10/22/2024 11:13:50 AM | Client ('192.168.0.51', 49057) disconnected and cleaned up.
+INFO 10/22/2024 11:30:29 AM | Client ('192.168.0.51', 49563) connected.
+INFO 10/22/2024 11:30:36 AM | Client ('192.168.0.51', 49563) disconnected and cleaned up.
+INFO 10/22/2024 11:30:49 AM | Client ('192.168.0.51', 49576) connected.
+INFO 10/22/2024 11:30:51 AM | Client ('192.168.0.51', 49576) disconnected and cleaned up.
+INFO 10/22/2024 11:36:24 AM | Client ('192.168.0.51', 49762) connected.
+INFO 10/22/2024 11:36:31 AM | Client ('192.168.0.51', 49762) disconnected and cleaned up.
+INFO 10/22/2024 11:36:53 AM | Client ('192.168.0.51', 49787) connected.
+INFO 10/22/2024 11:36:54 AM | Client ('192.168.0.51', 49787) disconnected and cleaned up.
+INFO 10/22/2024 11:38:55 AM | Client ('192.168.0.51', 49847) connected.
+INFO 10/22/2024 11:38:56 AM | Client ('192.168.0.51', 49847) disconnected and cleaned up.
+INFO 10/22/2024 11:41:29 AM | Client ('192.168.0.51', 49921) connected.
+INFO 10/22/2024 11:41:31 AM | Client ('192.168.0.51', 49921) disconnected and cleaned up.
+INFO 10/22/2024 11:42:20 AM | Client ('192.168.0.51', 49950) connected.
+INFO 10/22/2024 11:42:36 AM | Client ('192.168.0.51', 49950) disconnected and cleaned up.
+INFO 10/22/2024 11:45:10 AM | Client ('192.168.0.51', 50101) connected.
+INFO 10/22/2024 11:45:13 AM | Client ('192.168.0.51', 50101) disconnected and cleaned up.
+INFO 10/22/2024 11:53:04 AM | Client ('192.168.0.51', 50316) connected.
+INFO 10/22/2024 11:53:04 AM | Client ('192.168.0.51', 50316) disconnected and cleaned up.
+INFO 10/22/2024 11:53:21 AM | Client ('192.168.0.51', 50330) connected.
+INFO 10/22/2024 11:53:26 AM | Client ('192.168.0.51', 50330) disconnected and cleaned up.
+INFO 10/22/2024 11:54:28 AM | Client ('192.168.0.51', 50374) connected.
+INFO 10/22/2024 11:54:28 AM | Client ('192.168.0.51', 50374) disconnected and cleaned up.
+INFO 10/22/2024 11:54:41 AM | Client ('192.168.0.51', 50382) connected.
+INFO 10/22/2024 11:54:43 AM | Client ('192.168.0.51', 50382) disconnected and cleaned up.
+INFO 10/22/2024 11:56:36 AM | Client ('192.168.0.51', 50439) connected.
+INFO 10/22/2024 11:56:40 AM | Client ('192.168.0.51', 50439) disconnected and cleaned up.
+INFO 10/22/2024 11:57:05 AM | Client ('192.168.0.51', 50456) connected.
+INFO 10/22/2024 11:57:15 AM | Client ('192.168.0.51', 50456) disconnected and cleaned up.
+INFO 10/22/2024 11:58:08 AM | Client ('192.168.0.51', 50501) connected.
+INFO 10/22/2024 11:58:09 AM | Client ('192.168.0.51', 50501) disconnected and cleaned up.
+INFO 10/22/2024 11:58:40 AM | Client ('192.168.0.51', 50517) connected.
+INFO 10/22/2024 11:58:41 AM | Client ('192.168.0.51', 50517) disconnected and cleaned up.
+INFO 10/22/2024 12:01:00 PM | Server initialized
+INFO 10/22/2024 12:01:03 PM | Server initialized
+INFO 10/22/2024 12:09:45 PM | Client ('192.168.0.51', 50888) connected.
+INFO 10/22/2024 12:09:46 PM | Client ('192.168.0.51', 50888) disconnected and cleaned up.
+INFO 10/22/2024 12:11:16 PM | Client ('192.168.0.51', 50939) connected.
+INFO 10/22/2024 12:11:20 PM | Client ('192.168.0.51', 50939) disconnected and cleaned up.
+INFO 10/22/2024 12:13:26 PM | Client ('192.168.0.51', 51003) connected.
+INFO 10/22/2024 12:13:29 PM | Client ('192.168.0.51', 51003) disconnected and cleaned up.
+INFO 10/22/2024 12:13:34 PM | Client ('192.168.0.51', 51010) connected.
+INFO 10/22/2024 12:13:39 PM | Client ('192.168.0.51', 51010) disconnected and cleaned up.
+INFO 10/22/2024 12:13:41 PM | Client ('192.168.0.51', 51016) connected.
+INFO 10/22/2024 12:13:47 PM | Client ('192.168.0.51', 51016) disconnected and cleaned up.
+INFO 10/22/2024 12:14:11 PM | Client ('192.168.0.51', 51035) connected.
+INFO 10/22/2024 12:14:15 PM | Client ('192.168.0.51', 51035) disconnected and cleaned up.
+INFO 10/22/2024 12:16:13 PM | Client ('192.168.0.51', 51087) connected.
+INFO 10/22/2024 12:16:18 PM | Client ('192.168.0.51', 51087) disconnected and cleaned up.
+INFO 10/22/2024 12:16:48 PM | Client ('192.168.0.51', 51109) connected.
+INFO 10/22/2024 12:16:53 PM | Client ('192.168.0.51', 51109) disconnected and cleaned up.
+INFO 10/22/2024 12:18:36 PM | Client ('192.168.0.51', 51162) connected.
+INFO 10/22/2024 12:18:37 PM | Client ('192.168.0.51', 51162) disconnected and cleaned up.
+INFO 10/22/2024 12:18:56 PM | Client ('192.168.0.51', 51182) connected.
+INFO 10/22/2024 12:18:57 PM | Client ('192.168.0.51', 51182) disconnected and cleaned up.
+INFO 10/22/2024 12:19:44 PM | Client ('192.168.0.51', 51214) connected.
+INFO 10/22/2024 12:19:47 PM | Client ('192.168.0.51', 51214) disconnected and cleaned up.
+INFO 10/22/2024 12:20:16 PM | Client ('192.168.0.51', 51245) connected.
+INFO 10/22/2024 12:20:19 PM | Client ('192.168.0.51', 51245) disconnected and cleaned up.
+INFO 10/22/2024 12:20:33 PM | Client ('192.168.0.51', 51257) connected.
+INFO 10/22/2024 12:20:39 PM | Client ('192.168.0.51', 51257) disconnected and cleaned up.
+INFO 10/22/2024 12:22:41 PM | Client ('192.168.0.51', 51322) connected.
+INFO 10/22/2024 12:22:45 PM | Client ('192.168.0.51', 51322) disconnected and cleaned up.
+INFO 10/22/2024 12:23:00 PM | Client ('192.168.0.51', 51333) connected.
+INFO 10/22/2024 12:23:13 PM | Client ('192.168.0.51', 51333) disconnected and cleaned up.
+INFO 10/22/2024 12:23:16 PM | Client ('192.168.0.51', 51349) connected.
+INFO 10/22/2024 12:23:25 PM | Client ('192.168.0.51', 51349) disconnected and cleaned up.
+INFO 10/22/2024 12:24:09 PM | Client ('192.168.0.51', 51383) connected.
+INFO 10/22/2024 12:24:11 PM | Client ('192.168.0.51', 51383) disconnected and cleaned up.
+INFO 10/22/2024 12:24:14 PM | Client ('192.168.0.51', 51387) connected.
+INFO 10/22/2024 12:24:17 PM | Client ('192.168.0.51', 51387) disconnected and cleaned up.
+INFO 10/22/2024 12:25:36 PM | Client ('192.168.0.51', 51429) connected.
+INFO 10/22/2024 12:25:37 PM | Client ('192.168.0.51', 51429) disconnected and cleaned up.
+INFO 10/22/2024 12:27:33 PM | Client ('192.168.0.51', 51494) connected.
+INFO 10/22/2024 12:27:38 PM | Client ('192.168.0.51', 51494) disconnected and cleaned up.
+INFO 10/22/2024 12:27:40 PM | Client ('192.168.0.51', 51500) connected.
+INFO 10/22/2024 12:27:44 PM | Client ('192.168.0.51', 51500) disconnected and cleaned up.
+INFO 10/22/2024 12:28:12 PM | Client ('192.168.0.51', 51518) connected.
+INFO 10/22/2024 12:28:16 PM | Client ('192.168.0.51', 51518) disconnected and cleaned up.
+INFO 10/22/2024 12:28:46 PM | Client ('192.168.0.51', 51539) connected.
+INFO 10/22/2024 12:28:52 PM | Client ('192.168.0.51', 51539) disconnected and cleaned up.
+INFO 10/22/2024 12:29:11 PM | Client ('192.168.0.51', 51553) connected.
+INFO 10/22/2024 12:29:15 PM | Client ('192.168.0.51', 51553) disconnected and cleaned up.
+INFO 10/22/2024 12:29:25 PM | Client ('192.168.0.51', 51564) connected.
+INFO 10/22/2024 12:29:29 PM | Client ('192.168.0.51', 51564) disconnected and cleaned up.
+INFO 10/22/2024 12:35:18 PM | Client ('192.168.0.51', 51754) connected.
+INFO 10/22/2024 12:35:18 PM | Client ('192.168.0.51', 51754) disconnected and cleaned up.
+INFO 10/22/2024 12:36:48 PM | Client ('192.168.0.51', 51796) connected.
+INFO 10/22/2024 12:37:12 PM | Client ('192.168.0.51', 51796) disconnected and cleaned up.
+INFO 10/22/2024 12:39:42 PM | Client ('192.168.0.51', 51882) connected.
+INFO 10/22/2024 12:39:45 PM | Client ('192.168.0.51', 51882) disconnected and cleaned up.
+INFO 10/22/2024 12:40:13 PM | Client ('192.168.0.51', 51903) connected.
+INFO 10/22/2024 12:40:24 PM | Client ('192.168.0.51', 51903) disconnected and cleaned up.
+INFO 10/22/2024 12:41:44 PM | Client ('192.168.0.51', 51950) connected.
+INFO 10/22/2024 12:41:46 PM | Client ('192.168.0.51', 51950) disconnected and cleaned up.
+INFO 10/22/2024 12:42:26 PM | Client ('192.168.0.51', 51971) connected.
+INFO 10/22/2024 12:42:31 PM | Client ('192.168.0.51', 51971) disconnected and cleaned up.
+INFO 10/22/2024 12:42:44 PM | Client ('192.168.0.51', 51984) connected.
+INFO 10/22/2024 12:42:46 PM | Client ('192.168.0.51', 51984) disconnected and cleaned up.
+INFO 10/22/2024 12:42:53 PM | Client ('192.168.0.51', 51992) connected.
+INFO 10/22/2024 12:42:54 PM | Client ('192.168.0.51', 51992) disconnected and cleaned up.
+INFO 10/22/2024 12:43:41 PM | Client ('192.168.0.51', 52038) connected.
+INFO 10/22/2024 12:43:49 PM | Client ('192.168.0.51', 52038) disconnected and cleaned up.
+INFO 10/22/2024 12:44:28 PM | Client ('192.168.0.51', 52099) connected.
+INFO 10/22/2024 12:44:30 PM | Client ('192.168.0.51', 52099) disconnected and cleaned up.
+INFO 10/22/2024 12:55:59 PM | Client ('192.168.0.51', 52455) connected.
+INFO 10/22/2024 12:56:05 PM | Client ('192.168.0.51', 52455) disconnected and cleaned up.
+INFO 10/22/2024 12:57:03 PM | Client ('192.168.0.51', 52495) connected.
+INFO 10/22/2024 12:57:08 PM | Client ('192.168.0.51', 52495) disconnected and cleaned up.
+INFO 10/22/2024 12:57:54 PM | Client ('192.168.0.51', 52541) connected.
+INFO 10/22/2024 12:58:01 PM | Client ('192.168.0.51', 52541) disconnected and cleaned up.
+INFO 10/22/2024 12:58:25 PM | Client ('192.168.0.51', 52562) connected.
+INFO 10/22/2024 12:58:31 PM | Client ('192.168.0.51', 52562) disconnected and cleaned up.
+INFO 10/22/2024 01:00:05 PM | Client ('192.168.0.51', 52617) connected.
+INFO 10/22/2024 01:00:14 PM | Client ('192.168.0.51', 52617) disconnected and cleaned up.
+INFO 10/22/2024 01:01:53 PM | Client ('192.168.0.51', 52674) connected.
+INFO 10/22/2024 01:02:01 PM | Client ('192.168.0.51', 52674) disconnected and cleaned up.
+INFO 10/22/2024 01:02:04 PM | Client ('192.168.0.51', 52691) connected.
+INFO 10/22/2024 01:02:05 PM | Client ('192.168.0.51', 52691) disconnected and cleaned up.
+INFO 10/22/2024 01:03:18 PM | Client ('192.168.0.51', 52731) connected.
+INFO 10/22/2024 01:03:27 PM | Client ('192.168.0.51', 52731) disconnected and cleaned up.
+INFO 10/22/2024 01:04:15 PM | Client ('192.168.0.51', 52768) connected.
+INFO 10/22/2024 01:04:33 PM | Client ('192.168.0.51', 52768) disconnected and cleaned up.
+INFO 10/22/2024 01:05:10 PM | Client ('192.168.0.51', 52803) connected.
+INFO 10/22/2024 01:05:23 PM | Client ('192.168.0.51', 52803) disconnected and cleaned up.
+INFO 10/22/2024 01:05:49 PM | Client ('192.168.0.51', 52829) connected.
+INFO 10/22/2024 01:05:57 PM | Client ('192.168.0.51', 52829) disconnected and cleaned up.
+INFO 10/22/2024 01:06:47 PM | Client ('192.168.0.51', 52862) connected.
+INFO 10/22/2024 01:07:04 PM | Client ('192.168.0.51', 52862) disconnected and cleaned up.
+INFO 10/22/2024 01:08:42 PM | Client ('192.168.0.51', 52928) connected.
+INFO 10/22/2024 01:08:46 PM | Client ('192.168.0.51', 52928) disconnected and cleaned up.
+INFO 10/22/2024 01:09:24 PM | Client ('192.168.0.51', 52951) connected.
+INFO 10/22/2024 01:09:35 PM | Client ('192.168.0.51', 52951) disconnected and cleaned up.
+INFO 10/22/2024 01:25:39 PM | Client ('192.168.0.51', 53454) connected.
+INFO 10/22/2024 01:25:41 PM | Client ('192.168.0.51', 53454) disconnected and cleaned up.
+INFO 10/22/2024 02:03:44 PM | Client ('192.168.0.51', 55210) connected.
+INFO 10/22/2024 02:03:47 PM | Client ('192.168.0.51', 55210) disconnected and cleaned up.
+INFO 10/22/2024 02:07:13 PM | Client ('192.168.0.51', 55311) connected.
+INFO 10/22/2024 02:07:15 PM | Client ('192.168.0.51', 55311) disconnected and cleaned up.
+INFO 10/22/2024 02:07:20 PM | Client ('192.168.0.51', 55317) connected.
+INFO 10/22/2024 02:07:22 PM | Client ('192.168.0.51', 55317) disconnected and cleaned up.
+INFO 10/22/2024 02:07:22 PM | Client ('192.168.0.51', 55320) connected.
+INFO 10/22/2024 02:08:33 PM | Server shutdown requested via KeyboardInterrupt
+INFO 10/22/2024 02:08:33 PM | Shutting down the server...
+INFO 10/22/2024 02:08:34 PM | Server shutdown complete.
+INFO 10/22/2024 02:08:40 PM | Server initialized
+INFO 10/22/2024 02:08:40 PM | Server started on 192.168.0.51:44200
+INFO 10/22/2024 02:08:54 PM | Client ('192.168.0.51', 55375) connected.
+INFO 10/22/2024 02:08:59 PM | Client ('192.168.0.51', 55375) disconnected and cleaned up.
+INFO 10/22/2024 02:09:02 PM | Server shutdown requested via KeyboardInterrupt
+INFO 10/22/2024 02:09:02 PM | Shutting down the server...
+INFO 10/22/2024 02:09:02 PM | Server shutdown complete.
+INFO 10/22/2024 02:09:03 PM | Server initialized
+INFO 10/22/2024 02:09:03 PM | Server started on 192.168.0.51:44200
+INFO 10/22/2024 02:09:08 PM | Client ('192.168.0.51', 55385) connected.
+INFO 10/22/2024 02:09:46 PM | Client ('192.168.0.51', 55385) disconnected and cleaned up.
+INFO 10/22/2024 02:10:09 PM | Client ('192.168.0.51', 55426) connected.
+INFO 10/22/2024 02:10:33 PM | Client ('192.168.0.51', 55426) disconnected and cleaned up.

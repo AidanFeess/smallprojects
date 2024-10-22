@@ -189,10 +189,6 @@ class NetworkServer():
     def cleanup_client(self, clientSock: socket.socket, clientAddr):
         """
         Cleans up the client connection after disconnection or error.
-        
-        Args:
-            clientSock (socket): The socket object for the client.
-            clientAddr (tuple): The client's address.
         """
         del(self.all_client_data[clientAddr[0]]) # remove entry in client data
         self.live_clients.remove(clientAddr[0]) # remove the live client

@@ -12,12 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import *
 import pygame
+import tkinter as tk # for getting screen size
 
-GAME_NAME = "Iron Tide: 1944"
+GAME_NAME = "RetroWurms"
 
 # Constants for screen size
-SCREEN_WIDTH = 1000
-SCREEN_HEIGHT = 800
+root = tk.Tk()
+root.withdraw()
+SCREEN_WIDTH = root.winfo_screenwidth()
+SCREEN_HEIGHT = root.winfo_screenheight() - 60
 
 # Constants for colors
 WHITE = (255, 255, 255)

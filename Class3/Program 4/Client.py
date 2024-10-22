@@ -1,12 +1,19 @@
 import socket, struct
-import threading, json, time, re
+import threading, json, time, re, os
 import pygame
+from pathlib import Path
 from abc import ABC, abstractmethod
 
 from typing import Dict, Optional, List, Tuple
 from collections import deque
 
 from GameConstants import *
+from Weapons import *
+
+## Some global variables that need to be defined early
+volume = 15
+fullscreen = True
+
 ## Networking functions and classes
 class NetworkClient:
     """
@@ -114,7 +121,7 @@ class NetworkClient:
         self.connected = False
         if self.connection:
             self.connection.close()
-        print("Client disconnected.")
+            print("Client disconnected.")
 
     def send_with_length_prefix(self, data: bytes):
         """
@@ -201,6 +208,8 @@ class GameClient():
 
     Args:
         gameData (GameData): A dictionary of game data like health, upgrades, etc.
+        username (str): The player's username
+        position (Position): The player's current position
     """
     def __init__(self, gameData: GameData, username: str = "Guest", position: Position = (0, 0)):
         self.gameData = gameData
@@ -210,8 +219,11 @@ class GameClient():
         self.server_data: ServerPacket = {}
         self.velocity = 5  # Horizontal movement speed
         self.velocity_y = 0  # Vertical velocity (gravity impact)
-        self.grounded = False  # Is the player grounded?
+        self.grounded = False 
         self.movement_disabled = False
+        self.networkClient = None
+
+        self.current_weapons: Weapon = None
 
         self.connInfo = {
             "ip": None, 
@@ -220,16 +232,14 @@ class GameClient():
 
         self.message: Optional[Message] = None  # Add message attribute for server messages like disconnects
 
-        # Spawn the player 100 pixels above the ground
-        self.spawn(400)
+        # Spawn the player above the center of the ground
+        self.spawn(0, 400)
 
     def connectToServer(self, ip: str = "127.0.0.1", port: int = 44200):
         """Creates a network client and attempts to connect to the given server"""
         self.connInfo["ip"], self.connInfo["port"] = ip, port
-        # Reset the message when joining a new server
         self.message = None
         self.networkClient = NetworkClient(self, ip, port)
-
 
     def logout(self):
             """Resets the game state and disconnects from the server."""
@@ -249,6 +259,7 @@ class GameClient():
         if not self.networkClient:
             return
         self.networkClient.disconnect()
+        self.networkClient.network_thread.join()
 
     def detect_collision(self):
         player_rect = pygame.Rect(SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2, PLAYER_WIDTH, PLAYER_HEIGHT)
@@ -265,14 +276,11 @@ class GameClient():
                 screen_line_end = CalculateScreenPosition(line_end, self.position)
 
                 if line_rect_collision(screen_line_start, screen_line_end, player_rect):
-                    # Calculate the slope
                     slope = (line_end.y - line_start.y) / (line_end.x - line_start.x + 0.01)
-
                     # Smooth player movement based on slope
                     target_y = min(line_start.y, line_end.y) - PLAYER_HEIGHT // 2
 
-                    # Allow a small buffer for grounding to improve jump detection
-                    buffer = 5  # A small buffer of 5 pixels
+                    buffer = 5  # A small buffer of 5 pixels for detection
                     if self.position.y + buffer >= target_y:  
                         self.grounded = True
 
@@ -280,8 +288,8 @@ class GameClient():
                     self.position.y += (target_y - self.position.y) * 0.2
 
                     # Adjust velocity based on slope (reduce gravity effect when climbing)
-                    if abs(slope) > 0:  # On a slope
-                        self.velocity_y = -self.velocity * slope * 0.5  # Adjust for slope
+                    if abs(slope) > 0:
+                        self.velocity_y = -self.velocity * slope * 0.5 
 
                     # Stop falling when grounded
                     if abs(self.position.y - target_y) < 1:  # Small tolerance to ensure proper grounding
@@ -307,12 +315,13 @@ class GameClient():
         
         # Horizontal movement
         if keys[pygame.K_a]:
-            moveVector.x -= self.velocity  # Move left (decrease x)
+            moveVector.x -= self.velocity
         if keys[pygame.K_d]:
-            moveVector.x += self.velocity  # Move right (increase x)
+            moveVector.x += self.velocity
 
         # Update the player's position with movement boundaries
         #TODO: Fix boundaries
+        ## I don't understand this TODO anymore
         self.position.x = max(-3000, min(3000, self.position.x + moveVector.x))
 
         # Jumping logic
@@ -354,18 +363,12 @@ class GameClient():
 
     def drawWorldObjects(self, screen):
         for obj in self.worldObjects:
-            # Calculate the screen position relative to player's current position
             screenPosition = CalculateScreenPosition(obj.worldPosition, self.position)
-
-            # Draw objects based on their type
             if obj.objectType.isSprite and obj.sprite:
-                # Draw the sprite
                 screen.blit(obj.sprite.image, (screenPosition.x, screenPosition.y))
             elif obj.objectType.isCircle:
-                # Draw a circle
                 pygame.draw.circle(screen, obj.color, (screenPosition.x, screenPosition.y), obj.width)
             elif obj.objectType.isRect:
-                # Draw a rectangle, ensuring it's centered
                 pygame.draw.rect(screen, obj.color, (screenPosition.x - obj.width // 2, screenPosition.y - obj.height // 2, obj.width, obj.height))
 
     def drawTerrain(self, screen):
@@ -374,11 +377,16 @@ class GameClient():
             adjusted_points: List[pygame.Vector2] = [CalculateScreenPosition(pygame.Vector2(x, y), self.position) for x, y in terrain]
             lowered_points = [pygame.Vector2(x+150, y+150) for x, y in adjusted_points]
             # basically draw the terrain to the bottom of the screen
+            # consider fullscreen being 60 taller
             adjusted_points.append((adjusted_points[-1][0], SCREEN_HEIGHT))
             adjusted_points.append((adjusted_points[0][0], SCREEN_HEIGHT))
 
-            lowered_points.append((lowered_points[-1][0], SCREEN_HEIGHT))
-            lowered_points.append((lowered_points[0][0], SCREEN_HEIGHT))
+            if fullscreen == False:
+                lowered_points.append((lowered_points[-1][0], SCREEN_HEIGHT))
+                lowered_points.append((lowered_points[0][0], SCREEN_HEIGHT))
+            else:
+                lowered_points.append((lowered_points[-1][0], SCREEN_HEIGHT + 60))
+                lowered_points.append((lowered_points[0][0], SCREEN_HEIGHT + 60))
 
             pygame.draw.polygon(screen, DARK_GREEN, adjusted_points)
             pygame.draw.polygon(screen, DIRT_BROWN, lowered_points)
@@ -391,20 +399,18 @@ class GameClient():
         
         clients_data = json.loads(self.server_data.clients_data)
         for client in clients_data:
-            # Convert string to dictionary
             if clients_data[client] == None:
                 continue
             client = json.loads(clients_data[client])
 
-            # Get the client position and convert to screen coordinates
             clientPosition = client['position']
             screenPosition = CalculateScreenPosition(pygame.Vector2(clientPosition['x'], clientPosition['y']), self.position)
 
             # Draw the other client's representation (e.g., a rectangle)
             player = pygame.draw.rect(screen, GREEN, (
-                screenPosition.x - PLAYER_WIDTH // 2,  # X coordinate
-                screenPosition.y - PLAYER_HEIGHT // 2,  # Y coordinate
-                PLAYER_WIDTH, PLAYER_HEIGHT  # Width and Height of the client rectangle
+                screenPosition.x - PLAYER_WIDTH // 2,
+                screenPosition.y - PLAYER_HEIGHT // 2,
+                PLAYER_WIDTH, PLAYER_HEIGHT
             ))
 
             font = pygame.font.SysFont(None, 40)
@@ -412,13 +418,31 @@ class GameClient():
             text_rect = text.get_rect(center=(player.x + PLAYER_WIDTH//2, player.y - 20))
             screen.blit(text, text_rect)
 
-    def spawn(self, spawn_height: int = 100):
+    def spawn(self, spawn_x: int = 0, spawn_height: int = 100):
         """
-        Spawns the player a certain height above the terrain.
+        Spawns the player at a given location, where 0,0 is the center of the world.
         """
-        self.position = pygame.Vector2(0, -spawn_height)  # Spawn the player at (0, -spawn_height) relative to the world
-        self.velocity_y = 0  # Reset vertical velocity
-        self.grounded = False  # Player is not grounded initially
+        self.position = pygame.Vector2(spawn_x, -spawn_height) 
+        self.velocity_y = 0
+        self.grounded = False
+
+    def equip_weapon(self, weapon: 'Weapon'):
+        """Equips a weapon for the player."""
+        if self.current_weapon:
+            self.current_weapon.unequipped(self)
+        self.current_weapon = weapon
+        self.current_weapon.equipped(self)
+
+    def unequip_weapon(self):
+        """Unequips the current weapon, if any."""
+        if self.current_weapon:
+            self.current_weapon.unequipped(self)
+            self.current_weapon = None
+
+    def activate_weapon(self):
+        """Activates the currently equipped weapon, if any."""
+        if self.current_weapon:
+            self.current_weapon.activated(self)
 
     def update(self, screen, dt):
         self.apply_gravity(dt)
@@ -466,8 +490,6 @@ class ServerMessage(Message):
         button_text_rect = button_text.get_rect(center=button_rect.center)
         screen.blit(button_text, button_text_rect)
 
-        pygame.display.flip()
-
         # Event handling for the confirm button
         for event in pygame.event.get():
             if event.type == pygame.MOUSEBUTTONDOWN and button_rect.collidepoint(event.pos):
@@ -475,6 +497,7 @@ class ServerMessage(Message):
                 global current_scene
                 current_scene = MainMenu(screen)
                 newClient.disconnectFromServer()
+                return
 
 newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 0))
 
@@ -652,15 +675,248 @@ class Debugger:
     
 ## Pygame setup
 pygame.init()
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.mixer.init()
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags=pygame.FULLSCREEN)
 current_scene = None
 clock = pygame.time.Clock()
 running = True
 dt = 0
 debugger = Debugger()
-discoverThread = None
 
-## Pygame Functions
+# Load sounds
+sound_folder = Path(__file__).parent / 'Sound'
+music_folder = sound_folder / 'Music'
+sfx_folder = sound_folder / 'SFX'
+
+# Menu GFX
+sprites_folder = Path(__file__).parent / 'Sprites'
+
+current_music = None
+
+def SwitchMusic(newMusic, looped: bool):
+    global current_music
+    pygame.mixer.music.load(f"{music_folder}/{newMusic}")
+    if looped:   
+        pygame.mixer.music.play(loops=-1)
+    else:
+        pygame.mixer.music.play()
+    current_music = newMusic
+
+### Pygame Functions
+
+## Menus
+
+class Menu(ABC):
+    """
+    Abstract class for rendering in-game menus
+    """
+    def __init__(self, title: str, options: list, font_size: int = 40):
+        self.title = title
+        self.options = options
+        self.font_size = font_size
+        self.active_option = None
+
+    @abc.abstractmethod
+    def on_select(self, selected_option: int):
+        return NotImplementedError
+
+    def handle_mouse_input(self, mouse_pos, mouse_click):
+        for idx, option_rect in enumerate(self.option_rects):
+            if option_rect.collidepoint(mouse_pos):
+                self.active_option = idx
+                if mouse_click[0]:
+                    self.on_select(idx)
+
+    def render(self, screen):
+        font = pygame.font.SysFont(None, self.font_size)
+
+        title_surf = font.render(self.title, True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(screen.get_width() // 2, 100))
+        screen.blit(title_surf, title_rect)
+
+        self.option_rects = []
+        for idx, option in enumerate(self.options):
+            option_color = (255, 0, 0) if idx == self.active_option else (255, 255, 255)
+            option_surf = font.render(option, True, option_color)
+            option_rect = option_surf.get_rect(center=(screen.get_width() // 2, 200 + idx * 50))
+            self.option_rects.append(option_rect)
+            screen.blit(option_surf, option_rect)
+
+class InventoryMenu(Menu):
+    def __init__(self, inventory_items: list, columns: int = 5, rows: int = 5, cell_size: int = 64, padding: int = 10):
+        super().__init__(title="Inventory", options=inventory_items)
+        self.columns = columns
+        self.rows = rows
+        self.cell_size = cell_size
+        self.padding = padding
+        self.position = (0, 0)
+
+    def set_position(self, screen):
+        self.position = (screen.get_width() - (self.columns * (self.cell_size + self.padding)) - 20, screen.get_height() - (self.rows * (self.cell_size + self.padding)) - 20)
+
+    def on_select(self, selected_option: int):
+        selected_item = self.options[selected_option]
+        print(f"Selected item: {selected_item}")
+
+    def render(self, screen):
+        self.set_position(screen)
+
+        # Create a transparent surface for the inventory background
+        background_width = self.columns * (self.cell_size + self.padding) + 20
+        background_height = self.rows * (self.cell_size + self.padding) + 20
+        background = pygame.Surface((background_width, background_height), pygame.SRCALPHA)
+        background.fill((0, 0, 0, 128))  # Semi-transparent background
+
+        # Blit the background onto the screen
+        screen.blit(background, (self.position[0] - 10, self.position[1] - 10))
+
+        font = pygame.font.SysFont(None, 30)
+
+        # Calculate grid placement
+        self.option_rects = []
+        for idx, option in enumerate(self.options):
+            col = idx % self.columns
+            row = idx // self.columns
+            x = self.position[0] + col * (self.cell_size + self.padding)
+            y = self.position[1] + row * (self.cell_size + self.padding)
+
+            # Draw the cell as a rectangle
+            cell_rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
+            pygame.draw.rect(screen, (255, 255, 255), cell_rect, 2)
+
+            # Render the item (text-based placeholder for now)
+            option_surf = font.render(option, True, (255, 255, 255))
+            option_rect = option_surf.get_rect(center=cell_rect.center)
+            screen.blit(option_surf, option_rect)
+
+            self.option_rects.append(cell_rect)
+
+    def handle_mouse_input(self, mouse_pos, mouse_click):
+        for idx, option_rect in enumerate(self.option_rects):
+            if option_rect.collidepoint(mouse_pos):
+                self.active_option = idx
+                if mouse_click[0]:
+                    self.on_select(idx)
+
+class PauseMenu(Menu):
+    def __init__(self, options: list):
+        super().__init__(title="Pause Menu", options=options, font_size=40)
+        self.title_font_size = 70  # Larger font size for the title
+        self.position = (0, 0)
+
+    def set_position(self, screen):
+        self.position = (screen.get_width() // 2, screen.get_height() // 2)
+
+    def on_select(self, selected_option: int):
+        if self.options[selected_option] == "Resume":
+            return "resume"
+        elif self.options[selected_option] == "Options":
+            return "options"
+        elif self.options[selected_option] == "Log Out":
+            return "logout"
+
+    def render(self, screen):
+        self.set_position(screen)
+
+        # Create a transparent overlay
+        overlay = pygame.Surface((screen.get_width(), screen.get_height()))
+        overlay.set_alpha(128)
+        overlay.fill((50, 50, 50))
+        screen.blit(overlay, (0, 0))
+
+        title_font = pygame.font.SysFont(None, self.title_font_size)
+        option_font = pygame.font.SysFont(None, self.font_size)
+
+        # Render the title
+        title_surf = title_font.render(self.title, True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(self.position[0], self.position[1] - 200))
+        screen.blit(title_surf, title_rect)
+
+        # Don't interact with the title when clicked
+        if title_rect.collidepoint(pygame.mouse.get_pos()):
+            return
+
+        self.option_rects = []
+        for idx, option in enumerate(self.options):
+            # Highlight the option on mouse hover
+            mouse_pos = pygame.mouse.get_pos()
+            is_hovered = False
+
+            option_rect = pygame.Rect(self.position[0] - 150, self.position[1] + idx * 80, 300, 60)
+            if option_rect.collidepoint(mouse_pos):
+                pygame.draw.rect(screen, DARK_GREEN, option_rect, border_radius=5)
+                is_hovered = True
+            else:
+                pygame.draw.rect(screen, (255, 255, 255), option_rect, 2, border_radius=5)
+
+            option_surf = option_font.render(option, True, (255, 255, 255) if not is_hovered else (0, 0, 0))
+            option_surf_rect = option_surf.get_rect(center=option_rect.center)
+            screen.blit(option_surf, option_surf_rect)
+
+            self.option_rects.append(option_rect)
+
+    def handle_mouse_input(self, mouse_pos, mouse_click):
+        for idx, option_rect in enumerate(self.option_rects):
+            if option_rect.collidepoint(mouse_pos):
+                if mouse_click[0]:  # Left click
+                    return self.on_select(idx)
+        return None
+
+class OptionMenu(Menu):
+    def __init__(self):
+        super().__init__(title="", options=[])
+
+    def render(self, screen):
+        global volume
+        global fullscreen
+        
+        self.set_position(screen)
+
+        overlay = pygame.Surface((screen.get_width(), screen.get_height()))
+        overlay.set_alpha(128)
+        overlay.fill((50, 50, 50))
+        screen.blit(overlay, (0, 0))
+
+        font = pygame.font.SysFont(None, 40)
+
+        volume_text = font.render(f"Volume: {volume}", True, (255, 255, 255))
+        screen.blit(volume_text, (self.position[0] - 100, self.position[1] - 150))
+
+        slider_rect = pygame.Rect(self.position[0] - 100, self.position[1] - 100, 200, 10)
+        pygame.draw.rect(screen, (255, 255, 255), slider_rect)
+
+        volume_pos = int(slider_rect.x + (volume / 100) * slider_rect.width)
+        pygame.draw.circle(screen, (255, 0, 0), (volume_pos, slider_rect.y + 5), 8)
+
+        toggle_text = "Fullscreen: On" if fullscreen else "Fullscreen: Off"
+        toggle_surf = font.render(toggle_text, True, (255, 255, 255))
+        toggle_rect = toggle_surf.get_rect(center=(self.position[0], self.position[1]))
+        pygame.draw.rect(screen, (255, 255, 255), toggle_rect.inflate(20, 10), 2)
+        screen.blit(toggle_surf, toggle_rect)
+
+        self.slider_rect = slider_rect
+        self.toggle_rect = toggle_rect
+
+    def handle_mouse_input(self, mouse_pos, mouse_click, mouse_held):
+        global volume
+        global fullscreen
+
+        if self.slider_rect.collidepoint(mouse_pos) and (mouse_click[0] or mouse_held[0]):
+            relative_x = mouse_pos[0] - self.slider_rect.x
+            volume = max(0, min(100, int((relative_x / self.slider_rect.width) * 100)))
+            print(volume)
+
+        if self.toggle_rect.collidepoint(mouse_pos) and mouse_click[0]:
+            fullscreen = not fullscreen
+            pygame.display.toggle_fullscreen()
+
+    def on_select(self, selected_option: int):
+        pass
+
+    def set_position(self, screen):
+        self.position = (screen.get_width() // 2, screen.get_height() // 2)
+
+## Scenes
 class Scene(ABC):
     """
     Abstract class that represents a game scene like a menu
@@ -692,71 +948,64 @@ class Gameplay(Scene):
     def __init__(self, screen):
         super().__init__(screen)
         self.paused = False
+        self.in_options_menu = False
+        self.inventoryMenu = InventoryMenu(["Sword", "Shield", "Potion"])
+        self.pauseMenu = PauseMenu(["Resume", "Options", "Log Out"])  # Added "Options" button
+        self.optionMenu = OptionMenu()  # Create the OptionMenu
 
     def handle_click(self, position):
-        # Check if the "Log Out" button is clicked
-        button_width = 220
-        button_height = 60
-        button_rect = pygame.Rect(SCREEN_WIDTH // 2 - button_width // 2, SCREEN_HEIGHT // 2 + 100, button_width, button_height)
-        if button_rect.collidepoint(position) and self.paused:
-            # Disconnect the client and return to the main menu
-            newClient.logout()
-            global current_scene
-            current_scene = MainMenu(self.screen)
+        if self.in_options_menu:
+            mouse_click = pygame.mouse.get_pressed()
+            mouse_pos = pygame.mouse.get_pos()
+            self.optionMenu.handle_mouse_input(mouse_pos, mouse_click, mouse_click)
+        elif self.paused:
+            selected_option = self.pauseMenu.handle_mouse_input(position, pygame.mouse.get_pressed())
+            if selected_option == "resume":
+                self.paused = False
+            elif selected_option == "options":
+                self.in_options_menu = True
+            elif selected_option == "logout":
+                newClient.logout()
+                global current_scene
+                current_scene = MainMenu(self.screen)
+                return
 
     def render(self):
         global running
         global dt
 
-        # Check if there's a message (e.g., server closed)
-        if isinstance(newClient.message, ServerMessage):
-            # Display server closed message
-            newClient.message.display(self.screen)
-            return
-
-        # Continue normal game rendering if no message
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+                return
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                self.paused = not self.paused  # Toggle pause
+                if self.in_options_menu:
+                    self.in_options_menu = False  # Exit options menu
+                else:
+                    self.paused = not self.paused  # Toggle pause
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 self.handle_click(event.pos)
 
-        # Regular game rendering
+        # Game rendering logic
         self.screen.fill(LIGHT_BLUE)
-
-        # Only update the player and game world if not paused
-        newClient.update(self.screen, dt)
-        debugger.display_debug_info(self.screen, (newClient.connectionInfo()[0], newClient.connectionInfo()[1]), newClient=newClient)
 
         if self.paused:
             newClient.movement_disabled = True
-            # Create a transparent gray overlay surface
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-            overlay.set_alpha(128)  # Set transparency (0-255, where 255 is fully opaque)
-            overlay.fill((50, 50, 50))  # Gray color
-            self.screen.blit(overlay, (0, 0))  # Draw the transparent overlay over the game
-
-            # Draw pause menu
-            font = pygame.font.SysFont(None, 60)
-
-            # Move the button lower and increase size
-            button_width = 220
-            button_height = 60
-            button_rect = pygame.Rect(SCREEN_WIDTH // 2 - button_width // 2, SCREEN_HEIGHT // 2 + 100, button_width, button_height)
-
-            pygame.draw.rect(self.screen, (0, 0, 0), button_rect, border_radius=10)  # Black background with rounded corners
-            pygame.draw.rect(self.screen, (255, 255, 255), button_rect, 2, border_radius=10)  # White border with rounded corners
-            button_text = font.render("Log Out", True, (255, 255, 255))
-            button_text_rect = button_text.get_rect(center=button_rect.center)
-            self.screen.blit(button_text, button_text_rect)
         else:
             newClient.movement_disabled = False
 
-        pygame.display.flip()
-        dt = clock.tick(60) / 1000
+        newClient.update(self.screen, dt)
+        debugger.display_debug_info(self.screen, newClient.connectionInfo(), newClient=newClient)
 
+        if not self.paused and not self.in_options_menu:
+            self.inventoryMenu.render(self.screen)
+
+        if self.paused and not self.in_options_menu:
+            self.pauseMenu.render(self.screen)
+        elif self.in_options_menu:
+            self.optionMenu.render(self.screen)
+
+        dt = clock.tick(60) / 1000
 
 class ServerSelect(Scene):
     def __init__(self, screen):
@@ -769,10 +1018,66 @@ class ServerSelect(Scene):
         self.lock = threading.Lock()  # Lock for managing server list updates
 
         # Start asynchronous server discovery
-        discoverThread = threading.Thread(target=discover_servers_async, args=(self.servers, self.lock), daemon=True).start()
+        threading.Thread(target=discover_servers_async, args=(self.servers, self.lock), daemon=True).start()
+        self.frame_index = 0
+        self.frames = []
+        self.frame_delay = 75  # Delay in milliseconds between frames
+        self.last_frame_update = pygame.time.get_ticks()  # Time of the last frame update
+
+        global sprites_folder
+        # Vaporwave aesthetic colors and fonts
+        self.button_color = (85, 255, 255)
+        self.hover_color = (255, 51, 153)
+        self.text_color = (255, 153, 0)
+        self.input_box_color = (255, 255, 255)
+        self.disabled_color = (128, 128, 128)
+
+        self.font = pygame.font.Font((f"{sprites_folder}\Fonts\\retro_font.ttf"), int(self.screen_height * 0.03))
+        self.title_font = pygame.font.Font((f"{sprites_folder}\Fonts\\retro_font.ttf"), int(self.screen_height * 0.03))
+
+        # Load all the frames from the GIF-like images
+        self.load_frames_from_folder(f"{sprites_folder}\Game\menu_background")
+
+    def load_frames_from_folder(self, folder_path):
+        for filename in sorted(os.listdir(folder_path)):
+            if filename.endswith(".png"):
+                frame = pygame.image.load(os.path.join(folder_path, filename)).convert_alpha()
+                scaled_frame = pygame.transform.scale(frame, (self.screen_width, self.screen_height))
+                self.frames.append(scaled_frame)
+
+    def draw_text_with_shadow(self, screen, text, font: pygame.font.Font, text_color, shadow_color, position, shadow_offset=5):
+        shadow_text = font.render(text, True, shadow_color)
+        shadow_rect = shadow_text.get_rect(center=(position[0] + shadow_offset, position[1] + shadow_offset))
+        screen.blit(shadow_text, shadow_rect)
+
+        main_text = font.render(text, True, text_color)
+        main_rect = main_text.get_rect(center=position)
+        screen.blit(main_text, main_rect)
+
+    def draw_button(self, screen, rect, text, hover):
+        color = self.hover_color if hover else self.button_color
+        pygame.draw.rect(screen, color, rect, border_radius=10)
+        glow_rect = rect.inflate(20, 20)
+        glow_surface = pygame.Surface(glow_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(glow_surface, (*color, 128), glow_surface.get_rect(), border_radius=10)
+        screen.blit(glow_surface, glow_rect.topleft)
+
+        shadow_color = (0, 0, 0)  # Black shadow
+        self.draw_text_with_shadow(screen, text, self.font, self.text_color, shadow_color, rect.center)
+
+    def draw_input_box(self, screen, label, rect, text, active):
+        shadow_color = (0, 0, 0)
+        label_position = (rect.x + rect.width // 2, rect.y - rect.height // 1.5)
+        self.draw_text_with_shadow(screen, label, self.font, self.text_color, shadow_color, label_position, shadow_offset=3)
+        border_thickness = 3 if active else 1
+        pygame.draw.rect(screen, self.input_box_color, rect, border_thickness, border_radius=10)
+        text_position = (rect.x + 10, rect.y + rect.height // 2)
+        text_surface = self.font.render(text, True, self.text_color)
+        text_rect = text_surface.get_rect(midleft=(rect.x + 10, rect.y + rect.height // 2))
+        screen.blit(text_surface, text_rect)
+
 
     def handle_click(self, position):
-        # Input box positions
         input_box = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.4, self.screen_width * 0.3, self.screen_height * 0.07)
         custom_server_box = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.55, self.screen_width * 0.3, self.screen_height * 0.07)
         join_button = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.75, self.screen_width * 0.3, self.screen_height * 0.08)
@@ -786,13 +1091,11 @@ class ServerSelect(Scene):
         else:
             self.active_input = None  # No input box clicked
 
-        # Check if the back button is clicked
         if back_button.collidepoint(position):
             global current_scene
             current_scene = MainMenu(self.screen)
             return
 
-        # Handle join button click
         if join_button.collidepoint(position) and self.selected_server:
             serverIp = self.selected_server.split("\n")[1]
             newClient.username = self.username
@@ -800,13 +1103,11 @@ class ServerSelect(Scene):
             current_scene = Gameplay(self.screen)
             return
 
-        # Handle custom server addition
         if add_server_button.collidepoint(position) and is_valid_ip(self.custom_server):
             with self.lock:
                 self.servers.append(f"Custom Server\n{self.custom_server}")
             self.custom_server = ""  # Clear input after adding the server
 
-        # Handle server selection
         for i, server in enumerate(self.servers):
             server_rect = pygame.Rect(self.screen_width * 0.05, self.screen_height * (0.2 + i * 0.1), self.screen_width * 0.4, self.screen_height * 0.08)
             if server_rect.collidepoint(position):
@@ -814,36 +1115,32 @@ class ServerSelect(Scene):
 
     def render(self):
         global running
+        current_time = pygame.time.get_ticks()
 
-        # Set up colors
-        background_color = (30, 30, 30)
-        text_color = (255, 255, 255)
-        button_color = (50, 150, 255)
-        button_hover_color = (70, 170, 255)
-        input_box_color = (255, 255, 255)
-        disabled_color = (128, 128, 128)
+        if current_time - self.last_frame_update > self.frame_delay:
+            self.frame_index = (self.frame_index + 1) % len(self.frames)
+            self.last_frame_update = current_time
 
-        # Get screen dimensions
-        screen_width, screen_height = self.screen.get_size()
+        shadow_color = (0, 0, 0)
+        title_color = (255, 102, 204)  # Neon pink for title
 
-        # Set up fonts
-        font = pygame.font.Font(None, int(screen_height * 0.05))
-        title_font = pygame.font.Font(None, int(screen_height * 0.07))
+        # Button dimensions
+        button_width, button_height = self.screen_width * 0.3, self.screen_height * 0.08
 
-        # Username and custom server input boxes
-        input_box = pygame.Rect(screen_width * 0.55, screen_height * 0.4, screen_width * 0.3, screen_height * 0.07)
-        custom_server_box = pygame.Rect(screen_width * 0.55, screen_height * 0.55, screen_width * 0.3, screen_height * 0.07)
+        # Button positions
+        join_button = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.75, button_width, button_height)
+        back_button = pygame.Rect(self.screen_width * 0.05, self.screen_height * 0.8, self.screen_width * 0.2, button_height)
+        add_server_button = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.65, button_width, button_height)
 
-        self.screen.fill(background_color)
+        screen.blit(self.frames[self.frame_index], (0, 0))
 
         # Handle events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
+                return
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 self.handle_click(event.pos)
-
             elif event.type == pygame.KEYDOWN and self.active_input:
                 if event.key == pygame.K_BACKSPACE:
                     if self.active_input == 'username':
@@ -857,121 +1154,247 @@ class ServerSelect(Scene):
                         elif self.active_input == 'custom_server':
                             self.custom_server += event.unicode
 
-        # Draw server list
-        title_text = title_font.render("Available Servers", True, text_color)
-        self.screen.blit(title_text, (screen_width * 0.05, screen_height * 0.1))
+        # Render title
+        self.draw_text_with_shadow(screen, "Available Servers", self.title_font, title_color, shadow_color, (self.screen_width * 0.3, self.screen_height * 0.1))
 
+        # Render buttons with hover effects and shadow text
+        mouse_pos = pygame.mouse.get_pos()
+        self.draw_button(screen, join_button, "Join", join_button.collidepoint(mouse_pos))
+        self.draw_button(screen, back_button, "Back", back_button.collidepoint(mouse_pos))
+        self.draw_button(screen, add_server_button, "Add Custom Server", add_server_button.collidepoint(mouse_pos))
+
+        # Render input boxes
+        username_box = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.4, button_width, button_height)
+        custom_server_box = pygame.Rect(self.screen_width * 0.55, self.screen_height * 0.55, button_width, button_height)
+        self.draw_input_box(screen, "Enter Username:", username_box, self.username, self.active_input == 'username')
+        self.draw_input_box(screen, "Custom Server IP:", custom_server_box, self.custom_server, self.active_input == 'custom_server')
+
+        # Render server list
         with self.lock:
             for i, server in enumerate(self.servers):
-                server_rect = pygame.Rect(screen_width * 0.05, screen_height * (0.2 + i * 0.1), screen_width * 0.4, screen_height * 0.08)
-                pygame.draw.rect(self.screen, button_hover_color if self.selected_server == server else button_color, server_rect)
+                server_rect = pygame.Rect(self.screen_width * 0.05, self.screen_height * (0.2 + i * 0.1), self.screen_width * 0.4, self.screen_height * 0.08)
+
+                # Check if this server is selected, and change color accordingly
+                if self.selected_server == server:
+                    server_color = (255, 255, 102)  # Highlighted color for selected server
+                else:
+                    server_color = self.button_color
+
+                pygame.draw.rect(screen, server_color, server_rect, border_radius=10)
                 server_name = server.split("\n")[0]
-                server_text = font.render(server_name, True, text_color)
-                self.screen.blit(server_text, (server_rect.x + 10, server_rect.y + 10))
-
-        # Draw Join button
-        join_button = pygame.Rect(screen_width * 0.55, screen_height * 0.75, screen_width * 0.3, screen_height * 0.08)
-        if self.selected_server:
-            pygame.draw.rect(self.screen, button_color, join_button)
-        else:
-            pygame.draw.rect(self.screen, disabled_color, join_button)
-        join_text = font.render("Join", True, text_color)
-        self.screen.blit(join_text, join_button.move((join_button.width - join_text.get_width()) // 2, (join_button.height - join_text.get_height()) // 2))
-
-        # Draw Back button
-        back_button = pygame.Rect(screen_width * 0.05, screen_height * 0.8, screen_width * 0.2, screen_height * 0.08)
-        pygame.draw.rect(self.screen, button_color, back_button)
-        back_text = font.render("Back", True, text_color)
-        self.screen.blit(back_text, back_button.move((back_button.width - back_text.get_width()) // 2, (back_button.height - back_text.get_height()) // 2))
-
-        # Draw username input box
-        username_label = font.render("Enter Username:", True, text_color)
-        self.screen.blit(username_label, (screen_width * 0.55, screen_height * 0.35))
-        pygame.draw.rect(self.screen, input_box_color, input_box, 2 if self.active_input == 'username' else 1)
-        username_surface = font.render(self.username, True, text_color)
-        self.screen.blit(username_surface, (input_box.x + 10, input_box.y + 10))
-
-        # Draw custom server input box
-        custom_server_label = font.render("Custom Server IP:", True, text_color)
-        self.screen.blit(custom_server_label, (screen_width * 0.55, screen_height * 0.5))
-        pygame.draw.rect(self.screen, input_box_color, custom_server_box, 2 if self.active_input == 'custom_server' else 1)
-        custom_server_surface = font.render(self.custom_server, True, text_color)
-        self.screen.blit(custom_server_surface, (custom_server_box.x + 10, custom_server_box.y + 10))
-
-        # Draw Add Custom Server button
-        add_server_button = pygame.Rect(screen_width * 0.55, screen_height * 0.65, screen_width * 0.3, screen_height * 0.08)
-        if is_valid_ip(self.custom_server):
-            pygame.draw.rect(self.screen, button_color, add_server_button)
-        else:
-            pygame.draw.rect(self.screen, disabled_color, add_server_button)
-        add_server_text = font.render("Add Custom Server", True, text_color)
-        self.screen.blit(add_server_text, add_server_button.move((add_server_button.width - add_server_text.get_width()) // 2, (add_server_button.height - add_server_text.get_height()) // 2))
-
-class MainMenu(Scene):
+                self.draw_text_with_shadow(screen, server_name, self.font, self.text_color, shadow_color, server_rect.center)
+class OptionsScene(Scene):
     def __init__(self, screen):
         super().__init__(screen)
+        self.fullscreen = fullscreen  # Assume fullscreen is a global variable
+        self.back_button = None
 
-    def handle_click(self, position):
-        pass
-        
     def render(self):
+        global running
         global current_scene
+        global volume
 
         background_color = (30, 30, 30)
-        title_color = (255, 255, 255)
         button_color = (50, 150, 255)
         button_hover_color = (70, 170, 255)
         text_color = (255, 255, 255)
 
-        # Set up fonts
-        title_font = pygame.font.Font(None, int(self.screen_height * 0.1))  # Title font size relative to screen height
-        server_select_font = pygame.font.Font(None, int(self.screen_height * 0.05))  # Button font size relative to screen height
-
-        # Set up title and button text
-        title_text = title_font.render(GAME_NAME, True, title_color)
-        server_select_text = server_select_font.render("Join a Server", True, text_color)
-
-        # Calculate title position (centered near the top)
-        title_rect = title_text.get_rect(center=(self.screen_width / 2, self.screen_height * 0.2))
-
-        # Calculate button position (centered on screen)
-        server_select_width, server_select_height = self.screen_width * 0.3, self.screen_height * 0.1  # Button size relative to screen
-        server_select_rect = pygame.Rect(
-            (self.screen_width / 2 - server_select_width / 2, self.screen_height / 2 - server_select_height / 2),
-            (server_select_width, server_select_height)
-        )
-
         screen.fill(background_color)
 
-        # Check for events
+        # Set up fonts
+        font = pygame.font.Font(None, int(self.screen_height * 0.05))
+
+        # Volume slider text
+        volume_text = font.render(f"Volume: {volume}", True, text_color)
+        volume_rect = pygame.Rect((self.screen_width / 2 - 100, self.screen_height * 0.3, 200, 10))
+        pygame.draw.rect(screen, (255, 255, 255), volume_rect)
+
+        volume_slider_pos = int(volume_rect.x + (volume / 100) * volume_rect.width)
+        pygame.draw.circle(screen, (255, 0, 0), (volume_slider_pos, volume_rect.y + 5), 8)
+
+        screen.blit(volume_text, (self.screen_width / 2 - 100, self.screen_height * 0.2))
+
+        # Fullscreen toggle button
+        toggle_text = "Fullscreen: On" if self.fullscreen else "Fullscreen: Off"
+        toggle_surf = font.render(toggle_text, True, text_color)
+        toggle_rect = toggle_surf.get_rect(center=(self.screen_width / 2, self.screen_height * 0.5))
+        pygame.draw.rect(screen, (255, 255, 255), toggle_rect.inflate(20, 10), 2)
+        screen.blit(toggle_surf, toggle_rect)
+
+        # Back button
+        back_text = font.render("Back", True, text_color)
+        back_rect = pygame.Rect(self.screen_width / 2 - 100, self.screen_height * 0.7, 200, 50)
+        if back_rect.collidepoint(pygame.mouse.get_pos()):
+            pygame.draw.rect(screen, button_hover_color, back_rect)
+        else:
+            pygame.draw.rect(screen, button_color, back_rect)
+
+        screen.blit(back_text, (self.screen_width / 2 - back_rect.width / 4, self.screen_height * 0.7 + back_rect.height / 4))
+
+        # Store rects for later use
+        self.volume_rect = volume_rect
+        self.toggle_rect = toggle_rect
+        self.back_button = back_rect
+
+        # Handle user input
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-                pygame.quit()
+                return
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                if server_select_rect.collidepoint(event.pos):
-                    ## Switch to the correct scene
-                    current_scene = ServerSelect(screen)
+                if self.volume_rect.collidepoint(event.pos):
+                    relative_x = event.pos[0] - self.volume_rect.x
+                    volume = max(0, min(100, int((relative_x / self.volume_rect.width) * 100)))
+                elif self.toggle_rect.collidepoint(event.pos):
+                    self.fullscreen = not self.fullscreen
+                    pygame.display.toggle_fullscreen()
+                elif self.back_button.collidepoint(event.pos):
+                    current_scene = MainMenu(screen)
                     return
 
-        # Draw title
-        screen.blit(title_text, title_rect)
+    def handle_click(self, position):
+        pass
 
-        # Draw button (change color if hovered)
-        mouse_pos = pygame.mouse.get_pos()
-        if server_select_rect.collidepoint(mouse_pos):
-            pygame.draw.rect(screen, button_hover_color, server_select_rect)
-        else:
-            pygame.draw.rect(screen, button_color, server_select_rect)
+class MainMenu(Scene):
+    def __init__(self, screen):
+        super().__init__(screen)
+        self.frame_index = 0
+        self.frames = []
+        self.frame_delay = 75  # Delay in milliseconds between frames
+        self.last_frame_update = pygame.time.get_ticks()  # Time of the last frame update
 
-        # Draw button text (centered on button)
-        button_text_rect = server_select_text.get_rect(center=server_select_rect.center)
-        screen.blit(server_select_text, button_text_rect)
+        global sprites_folder
+        # color scheme for vaporwave aesthetics
+        self.button_color = (85, 255, 255)
+        self.hover_color = (255, 51, 153) 
+        self.text_color = (255, 153, 0)
+        self.font = pygame.font.Font((f"{sprites_folder}\Fonts\\retro_font.ttf"), int(self.screen_height * 0.025))
+        self.title_font = pygame.font.Font((f"{sprites_folder}\Fonts\\retro_font.ttf"), int(self.screen_height * 0.055))
         
+        # Load all the frames from the GIF-like images
+        self.load_frames_from_folder(f"{sprites_folder}\Game\menu_background")
+
+    def load_frames_from_folder(self, folder_path):
+        for filename in sorted(os.listdir(folder_path)):
+            if filename.endswith(".png"):
+                frame = pygame.image.load(os.path.join(folder_path, filename)).convert_alpha()
+                scaled_frame = pygame.transform.scale(frame, (self.screen_width, self.screen_height))
+                self.frames.append(scaled_frame)
+
+    def draw_text_with_shadow(self, screen, text, font, text_color, shadow_color, position, shadow_offset=5):
+        """
+        Draws text with a drop shadow effect.
+        
+        Args:
+        - screen: The pygame screen surface where the text will be rendered.
+        - text: The text to render.
+        - font: The font object to use for the text rendering.
+        - text_color: Color of the main text.
+        - shadow_color: Color of the shadow text.
+        - position: A tuple (x, y) for the center position of the text.
+        - shadow_offset: The offset for the shadow (default is 5 pixels).
+        """
+        # Render shadow text (offset by shadow_offset pixels)
+        shadow_text = font.render(text, True, shadow_color)
+        shadow_rect = shadow_text.get_rect(center=(position[0] + shadow_offset, position[1] + shadow_offset))
+        screen.blit(shadow_text, shadow_rect)
+
+        # Render the main text on top
+        main_text = font.render(text, True, text_color)
+        main_rect = main_text.get_rect(center=position)
+        screen.blit(main_text, main_rect)
+
+    def draw_button(self, screen, rect, text, hover):
+        color = self.hover_color if hover else self.button_color
+        # Draw a rectangle with rounded corners (glow effect)
+        pygame.draw.rect(screen, color, rect, border_radius=10)
+        # Outer glow
+        glow_rect = rect.inflate(20, 20)
+        glow_surface = pygame.Surface(glow_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(glow_surface, (*color, 128), glow_surface.get_rect(), border_radius=10)
+        screen.blit(glow_surface, glow_rect.topleft)
+
+        # Use draw_text_with_shadow to render text with shadow on the button
+        shadow_color = (0, 0, 0)  # Black shadow
+        self.draw_text_with_shadow(screen, text, self.font, self.text_color, shadow_color, rect.center, shadow_offset=3)
+
+
+    def handle_click(self, position):
+        pass
+
+    def render(self):
+        global running
+        global current_scene
+        global current_music
+
+        if current_music != "menu.mp3":
+            SwitchMusic("menu.mp3", True)
+
+        current_time = pygame.time.get_ticks()
+
+        if current_time - self.last_frame_update > self.frame_delay:
+            self.frame_index = (self.frame_index + 1) % len(self.frames)  # Loop back to the first frame
+            self.last_frame_update = current_time  # Update the time of the last frame change
+
+        shadow_color = (0, 0, 0)
+        title_color = (255, 102, 204)  # Neon pink for title
+
+        # Button dimensions
+        button_width, button_height = self.screen_width * 0.3, self.screen_height * 0.1
+        button_vertical_offset = 30
+
+        # Button positions
+        server_select_rect = pygame.Rect(
+            (self.screen_width / 2 - button_width / 2, self.screen_height / 2 - button_height / 2 + button_vertical_offset),
+            (button_width, button_height)
+        )
+        options_rect = pygame.Rect(
+            (self.screen_width / 2 - button_width / 2, self.screen_height / 2 - button_height / 2 + button_height * 1.5 + button_vertical_offset),
+            (button_width, button_height)
+        )
+        exit_rect = pygame.Rect(
+            (self.screen_width / 2 - button_width / 2, self.screen_height / 2 - button_height / 2 + button_height * 3 + button_vertical_offset),
+            (button_width, button_height)
+        )
+
+        # Handle events and check for mouse hover
+        mouse_pos = pygame.mouse.get_pos()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+                return
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if server_select_rect.collidepoint(event.pos):
+                    current_scene = ServerSelect(screen)
+                    return
+                elif options_rect.collidepoint(event.pos):  # Redirect to Options scene
+                    current_scene = OptionsScene(screen)
+                    return
+                elif exit_rect.collidepoint(event.pos):
+                    running = False
+                    return
+
+        # Render background
+        screen.blit(self.frames[self.frame_index], (0, 0))
+
+        # Render title
+        self.draw_text_with_shadow(screen, str.upper(GAME_NAME), self.title_font, title_color, shadow_color, (self.screen_width / 2, self.screen_height * 0.2))
+
+        # Draw buttons with hover effects
+        self.draw_button(screen, server_select_rect, "Join a Server", server_select_rect.collidepoint(mouse_pos))
+        self.draw_button(screen, options_rect, "Options", options_rect.collidepoint(mouse_pos))
+        self.draw_button(screen, exit_rect, "Exit", exit_rect.collidepoint(mouse_pos))
+
+
 current_scene = MainMenu(screen)
 
 while running:
-    current_scene.update()
+    pygame.mixer.music.set_volume(volume / 100)
+    if current_scene:  
+        current_scene.update()
+    else:
+        break
 
-newClient.disconnectFromServer()
 pygame.quit()
+newClient.disconnectFromServer()
+os._exit(0)
