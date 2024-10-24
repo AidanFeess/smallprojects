@@ -54,17 +54,11 @@ class NetworkClient:
         self.host = host
         self.port = port
         self.gameClient = gameClient
-
-        # For reconnection
         self.connection = None
         self.connected = False
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 3
-
-        # Connect to the server
         self.connect_to_server()
-
-        # Start a separate thread for network communication
         self.network_thread = threading.Thread(target=self.run_network, daemon=True)
         self.network_thread.start()
 
@@ -325,13 +319,13 @@ class GameClient():
         self.position = position
         self.worldObjects = []
         self.server_data: ServerPacket = {}
-        self.velocity = 5  # Horizontal movement speed
-        self.velocity_y = 0  # Vertical velocity (gravity impact)
+        self.velocity = 5
+        self.velocity_y = 0 
         self.grounded = False 
         self.movement_disabled = False
         self.networkClient = None
         self.facing_right = True
-        self.current_animation = "Idle"   # Track the currently playing animation
+        self.current_animation = "Idle" 
         self.animation_in_progress = False  # To block other animations when sword swing is playing
         self.player_scale = 3
         self.just_equipped = False
@@ -379,12 +373,7 @@ class GameClient():
             position: The position to draw the animation.
         """
         current_time = pygame.time.get_ticks()
-
-        # Adjust frame delay based on self.current_animspeed
-        # Higher self.current_animspeed makes the animation faster, lower makes it slower
         adjusted_frame_delay = self.frame_delay / self.current_animspeed
-
-        # Check if enough time has passed to change the frame
         if current_time - self.last_frame_time > adjusted_frame_delay:
             self.current_frame_index = (self.current_frame_index + 1) % len(self.animation_frames)
             self.last_frame_time = current_time
@@ -403,7 +392,6 @@ class GameClient():
                 frame_height = int(frame.get_height() * self.player_scale)
                 frame = pygame.transform.scale(frame, (frame_width, frame_height))
 
-            # Blit the current frame to the screen
             screen.blit(frame, (position.x + (PLAYER_WIDTH * self.player_scale) // 2 - frame.get_width() // 2, position.y + (PLAYER_HEIGHT * self.player_scale) // 2 - frame.get_height() // 2))
         
         except Exception as e:
@@ -439,23 +427,23 @@ class GameClient():
         """Resets the game state and disconnects from the server."""
         # Reset player position and movement
         self.position = pygame.Vector2(0, 0)
-        self.velocity = 5  # Reset horizontal movement speed
-        self.velocity_y = 0  # Reset vertical velocity (gravity impact)
-        self.grounded = False  # The player is not grounded initially
-        self.movement_disabled = False  # Reset to allow movement
+        self.velocity = 5
+        self.velocity_y = 0
+        self.grounded = False 
+        self.movement_disabled = False 
         
         # Reset inventory, weapon, and animation states
-        self.current_weapon = None  # Unequip any equipped weapon
-        self.current_animation = "Idle"  # Reset to default idle animation
-        self.current_frame_index = 0  # Reset animation frame index
-        self.last_frame_time = pygame.time.get_ticks()  # Reset frame timing
-        self.animation_in_progress = False  # No animation in progress
-        self.current_animspeed = 1  # Reset animation speed to default
+        self.current_weapon = None 
+        self.current_animation = "Idle"  
+        self.current_frame_index = 0  
+        self.last_frame_time = pygame.time.get_ticks() 
+        self.animation_in_progress = False 
+        self.current_animspeed = 1 
 
         # Reset world state
-        self.worldObjects = []  # Clear any world objects
-        self.server_data = None  # Clear server data
-        self.message = None  # Clear any server messages
+        self.worldObjects = [] 
+        self.server_data = None
+        self.message = None 
 
         # Reset connection info
         self.connInfo = {
@@ -488,7 +476,7 @@ class GameClient():
 
             closest_building_top = None
             horizontal_collision = False
-            player_new_x = self.position.x  # Store the player's new x position in case of horizontal collision
+            player_new_x = self.position.x 
 
             # Loop through each building to check for collision
             for building in terrain:
@@ -499,38 +487,29 @@ class GameClient():
                 
                 # Horizontal Collision Detection (blocking sides)
                 if player_top_y <= top_left.y and player_bottom_y >= bottom_left.y:
-                    # The player's top and bottom are within the vertical bounds of the building
 
                     if player_x + player_width > top_left.x and player_x < top_left.x:
-                        # Player is hitting the left side of the building
-                        player_new_x = top_left.x - player_width  # Prevent moving through the left side
+                        player_new_x = top_left.x - player_width
                         horizontal_collision = True
                     elif player_x < top_right.x and player_x + player_width > top_right.x:
-                        # Player is hitting the right side of the building
-                        player_new_x = top_right.x  # Prevent moving through the right side
+                        player_new_x = top_right.x 
                         horizontal_collision = True
 
-                # If the player is within the horizontal bounds of the building, check for grounding
                 if top_left.x <= player_x <= top_right.x:
-                    # The player is within the horizontal bounds of the building
 
-                    # Top of the building is the Y value of the top-left point
                     building_top_y = top_left.y
 
-                    # If this is the closest building top that the player can land on
                     if closest_building_top is None or building_top_y > closest_building_top:
                         closest_building_top = building_top_y
 
-            # Update the player's position if there was horizontal collision
             if horizontal_collision:
                 self.position.x = player_new_x
 
             # Now that we have the closest building top, check if the player is grounded on it
             if closest_building_top is not None and not horizontal_collision:
-                buffer = 1  # Small buffer to avoid "floating"
+                buffer = 1  # Small buffer to avoid "floating", was more of an issue when terrain was rockier
                 if player_bottom_y >= closest_building_top - buffer:
                     self.grounded = True
-                    # Adjust the player's position so that the bottom of the player is at ground level
                     self.position.y = closest_building_top - (PLAYER_HEIGHT * self.player_scale) // 2
                 else:
                     self.grounded = False
@@ -548,8 +527,6 @@ class GameClient():
             # Calculate the next position if gravity were applied
             next_velocity_y = self.velocity_y + GRAVITY * dt
             next_position_y = self.position.y + next_velocity_y * dt
-
-            # Check if moving to this next position would cause a collision
             self.position.y = next_position_y
             if self.detect_collision():
                 # If collision detected, adjust position to the ground level and reset velocity
@@ -589,10 +566,9 @@ class GameClient():
         # Jumping logic
         if keys[pygame.K_SPACE] and self.grounded:
             jumping = True
-            self.velocity_y = -65 * self.velocity  # Jumping sets a strong upward velocity
-            self.grounded = False  # Player is no longer grounded when jumping
+            self.velocity_y = -65 * self.velocity 
+            self.grounded = False 
 
-        # Falling logic: Detect when the player is falling
         if self.velocity_y > 0 and not self.grounded:
             falling = True
 
@@ -635,8 +611,6 @@ class GameClient():
 
         # Create the hitbox rectangle
         hitbox_rect = pygame.Rect(player_x, player_y, PLAYER_WIDTH * self.player_scale, PLAYER_HEIGHT * self.player_scale)
-
-        # Delegate hitbox drawing to the debugger
         if debugger.show_debug:
             debugger.draw_hitbox(screen, hitbox_rect, self.username)
 
@@ -1166,8 +1140,8 @@ class InventoryMenu(Menu):
         )
 
         # Set the position of the arrow just to the left of the inventory
-        self.arrow_rect.x = self.position[0] - 60  # Place the arrow 60 pixels to the left of the inventory
-        self.arrow_rect.y = self.position[1] - 10  # Align the arrow with the top of the inventory
+        self.arrow_rect.x = self.position[0] - 60 
+        self.arrow_rect.y = self.position[1] - 10 
 
     def on_select(self, row_idx: int, col_idx: int):
         """Handles selection of an inventory item for equipping without using it."""
@@ -1188,11 +1162,8 @@ class InventoryMenu(Menu):
         self.visible = not self.visible
 
     def render(self, screen):
-        # Always render the toggle arrow button, regardless of inventory visibility
         self.set_position(screen)
         self._draw_toggle_arrow(screen)
-
-        # If inventory is not visible, return here after drawing the arrow
         if not self.visible:
             return
 
@@ -1203,7 +1174,6 @@ class InventoryMenu(Menu):
         # Clear previous option rectangles (click detection areas)
         self.option_rects.clear()
 
-        # Iterate through the inventory items and render them
         for row_idx, row in enumerate(self.options):
             for col_idx, (option, amount) in enumerate(row):
                 if option is not None:
@@ -1229,11 +1199,7 @@ class InventoryMenu(Menu):
         """Renders a single cell in the inventory grid."""
         x = self.position[0] + col_idx * (self.cell_size + self.padding)
         y = self.position[1] + row_idx * (self.cell_size + self.padding)
-
-        # Draw the cell rectangle
         cell_rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
-
-        # Only draw the border and content if there is an item
         if option:
             self._draw_cell_border(screen, cell_rect, option)
 
@@ -1283,7 +1249,6 @@ class InventoryMenu(Menu):
 
     def handle_mouse_input(self, mouse_pos, mouse_click):
         """Handles mouse input for toggling the inventory and selecting items."""
-        # Check if the arrow button was clicked
         if self.arrow_rect.collidepoint(mouse_pos) and mouse_click == 1:
             self.toggle_inventory()
 
