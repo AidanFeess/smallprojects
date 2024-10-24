@@ -38,7 +38,7 @@ def SwitchMusic(newMusic, looped: bool):
     current_music = newMusic
 
 ## Some global variables that need to be defined early
-volume = 0
+volume = 10
 fullscreen = True
 
 ## Networking functions and classes
