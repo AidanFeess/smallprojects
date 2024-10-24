@@ -3,32 +3,59 @@ import threading, json, time, re, os
 import pygame
 from pathlib import Path
 from abc import ABC, abstractmethod
-
-from typing import Dict, Optional, List, Tuple
+from typing import Optional, Tuple
 from collections import deque
 
 from GameConstants import *
 from Weapons import *
 
+## Pygame setup
+pygame.init()
+pygame.mixer.init()
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags=pygame.FULLSCREEN)
+current_scene = None
+clock = pygame.time.Clock()
+running = True
+dt = 0
+
+# Load sounds
+sound_folder = Path(__file__).parent / 'Sound'
+music_folder = sound_folder / 'Music'
+sfx_folder = sound_folder / 'SFX'
+
+# Menu GFX
+sprites_folder = Path(__file__).parent / 'Sprites'
+
+current_music = None
+
+def SwitchMusic(newMusic, looped: bool):
+    global current_music
+    pygame.mixer.music.load(f"{music_folder}/{newMusic}")
+    if looped:   
+        pygame.mixer.music.play(loops=-1)
+    else:
+        pygame.mixer.music.play()
+    current_music = newMusic
+
 ## Some global variables that need to be defined early
-volume = 15
+volume = 0
 fullscreen = True
 
 ## Networking functions and classes
 class NetworkClient:
     """
-    A client class that handles client connections to the server.\n
-    Stores and receives data from the server.\n
+    A client class that handles client connections to the server.
+    Stores and receives data from the server.
     Only meant to be used indirectly through GameClient.
     """
 
     def __init__(self, gameClient: 'GameClient', host: str = "127.0.0.1", port: int = 44200):
-        # basic server stuff
+        # Basic server stuff
         self.host = host
         self.port = port
         self.gameClient = gameClient
 
-        # for reconnection
+        # For reconnection
         self.connection = None
         self.connected = False
         self.reconnect_attempts = 0
@@ -63,6 +90,7 @@ class NetworkClient:
                 if not rawdata:
                     raise ConnectionError("Server closed")
 
+                # Deserialize and update server data (including enemy data)
                 self.gameClient.server_data = self.deserialize_server_data(rawdata)
                 time.sleep(0.01)  # Send data every 10 ms
 
@@ -82,8 +110,7 @@ class NetworkClient:
 
             # Receive the server info packet (initial handshake or entry message)
             serverData = self.connection.recv(1024)
-            # close if server sends close command
-            if "[CLOSECONNECTION]" in serverData.decode('utf-8'): # this is a stupid way to do this
+            if "[CLOSECONNECTION]" in serverData.decode('utf-8'):
                 self.connected = False
                 return False
             self.serverInfo = self.deserialize_server_join_data(serverData)
@@ -110,7 +137,6 @@ class NetworkClient:
             except Exception as e:
                 print(f"Reconnect attempt failed: {e}")
 
-        # If we reach max attempts, show a failure message
         if not self.connected and self.reconnect_attempts >= self.max_reconnect_attempts:
             self.gameClient.message = ServerMessage("Failed to reconnect to the server.")
 
@@ -130,7 +156,6 @@ class NetworkClient:
         try:
             length_prefix = struct.pack('!I', len(data))
             self.connection.sendall(length_prefix + data)
-
         except (socket.error, OSError) as e:
             print(f"Error sending data: {e}")
             self.reconnect_to_server()
@@ -139,10 +164,32 @@ class NetworkClient:
         """
         Converts the dataclass to a dictionary for JSON serialization.
         """
+        # Serialize current_weapon separately if it exists
+        weapon_data = None
+        if packet.gameData.current_weapon:
+            weapon_data = {
+                "name": packet.gameData.current_weapon.name,
+                "range": packet.gameData.current_weapon.range,
+                "damage": packet.gameData.current_weapon.damage
+            }
+
         data_dict = {
             "username": packet.username,
             "position": {"x": packet.position.x, "y": packet.position.y},
-            "gameData": {"HP": packet.gameData.HP}
+            "gameData": {
+                "HP": packet.gameData.HP,
+                "facing_right": packet.gameData.facing_right,
+                "current_animation": packet.gameData.current_animation,
+                "current_frame_index": packet.gameData.current_frame_index,
+                "last_frame_time": packet.gameData.last_frame_time,
+                "player_scale": packet.gameData.player_scale,
+                "velocity": packet.gameData.velocity,
+                "velocity_y": packet.gameData.velocity_y,
+                "grounded": packet.gameData.grounded,
+                "movement_disabled": packet.gameData.movement_disabled,
+                "animation_in_progress": packet.gameData.animation_in_progress,
+                "current_weapon": weapon_data
+            }
         }
 
         return json.dumps(data_dict).encode('utf-8')
@@ -157,15 +204,73 @@ class NetworkClient:
             serverip=data_dict["serverip"],
             serverport=data_dict["serverport"]
         )
-    
-    def deserialize_server_data(self, data: bytes):
+
+    def deserialize_server_data(self, data: bytes) -> ServerPacket:
         """
-        Deserializes the server packet from the server.
+        Deserializes the server packet from the server, including enemy data.
         """
         data_dict = json.loads(data.decode('utf-8'))
+
+        clients_data = {}
+        enemies = []
+
+        # Ensure 'clients_data' is correctly deserialized into a dictionary
+        if isinstance(data_dict['clients_data'], str):
+            data_dict['clients_data'] = json.loads(data_dict['clients_data'])
+
+        # Deserialize client data
+        for client, client_data in data_dict['clients_data'].items():
+            if client_data is None:
+                continue
+
+            client_data_dict = json.loads(client_data)
+            weapon_data = client_data_dict['gameData'].get('current_weapon')
+            current_weapon = None
+            if weapon_data:
+                current_weapon = Weapon(
+                    name=weapon_data["name"],
+                    range=weapon_data["range"],
+                    damage=weapon_data["damage"]
+                )
+
+            position = Position(**client_data_dict['position'])
+            gameData = GameData(
+                HP=client_data_dict['gameData']['HP'],
+                facing_right=client_data_dict['gameData']['facing_right'],
+                current_animation=client_data_dict['gameData']['current_animation'],
+                current_frame_index=client_data_dict['gameData']['current_frame_index'],
+                last_frame_time=client_data_dict['gameData']['last_frame_time'],
+                player_scale=client_data_dict['gameData']['player_scale'],
+                velocity=client_data_dict['gameData']['velocity'],
+                velocity_y=client_data_dict['gameData']['velocity_y'],
+                grounded=client_data_dict['gameData']['grounded'],
+                movement_disabled=client_data_dict['gameData']['movement_disabled'],
+                animation_in_progress=client_data_dict['gameData']['animation_in_progress'],
+                current_weapon=current_weapon
+            )
+
+            clients_data[client] = {
+                "username": client_data_dict["username"],
+                "position": position,
+                "gameData": gameData
+            }
+
+        # Deserialize enemy data
+        enemies = {}
+        for id, enemy_info in data_dict['enemy_data'].items():
+            enemies[id] = {
+                "position": pygame.Vector2(enemy_info["position"]["x"], enemy_info["position"]["y"]),
+                "health": enemy_info["health"],
+                "animation_frame": enemy_info["animation_frame"],
+                "current_animation": enemy_info["current_animation"],
+                "is_alive": enemy_info["is_alive"]
+            }
+
+        # Return the deserialized server packet
         return ServerPacket(
             terrain=data_dict["terrain"],
-            clients_data=data_dict["clients_data"]
+            clients_data=clients_data,
+            enemy_data=enemies  # Include enemy data
         )
 
 def discover_servers_async(servers, lock, port=44200, timeout=3):
@@ -210,6 +315,9 @@ class GameClient():
         gameData (GameData): A dictionary of game data like health, upgrades, etc.
         username (str): The player's username
         position (Position): The player's current position
+
+    In hindsight I should've separated this class's functions and an 'entity' class
+    You live and you learn I guess...
     """
     def __init__(self, gameData: GameData, username: str = "Guest", position: Position = (0, 0)):
         self.gameData = gameData
@@ -222,8 +330,15 @@ class GameClient():
         self.grounded = False 
         self.movement_disabled = False
         self.networkClient = None
+        self.facing_right = True
+        self.current_animation = "Idle"   # Track the currently playing animation
+        self.animation_in_progress = False  # To block other animations when sword swing is playing
+        self.player_scale = 3
+        self.just_equipped = False
+        self.hit_objects = {}
+        self.already_hit = []
 
-        self.current_weapons: Weapon = None
+        self.current_weapon: Weapon = None
 
         self.connInfo = {
             "ip": None, 
@@ -232,8 +347,87 @@ class GameClient():
 
         self.message: Optional[Message] = None  # Add message attribute for server messages like disconnects
 
+        # Animation stuff
+        self.animation_frames = []
+        self.current_frame_index = 0
+        self.frame_delay = 100  # milliseconds per frame
+        self.current_animspeed = 1
+        self.last_frame_time = pygame.time.get_ticks()
+        self.animate("Idle")
+
         # Spawn the player above the center of the ground
         self.spawn(0, 400)
+
+    def animate(self, sprite_sheet_path: str):
+        """Load and set up animations."""
+        sprite_sheet = pygame.image.load(f"{sprites_folder}/Player/{sprite_sheet_path}.png").convert_alpha()
+        sheet_width, sheet_height = sprite_sheet.get_size()
+        self.animation_frames = []
+
+        # Split the sprite sheet into frames
+        for y in range(0, sheet_height, 150):
+            for x in range(0, sheet_width, 150):
+                frame = sprite_sheet.subsurface((x, y, 150, 150))
+                self.animation_frames.append(frame)
+
+    def play_animation(self, screen, position):
+        """
+        Plays the animation with speed controlled by self.current_animspeed.
+
+        Args:
+            screen: The pygame screen object.
+            position: The position to draw the animation.
+        """
+        current_time = pygame.time.get_ticks()
+
+        # Adjust frame delay based on self.current_animspeed
+        # Higher self.current_animspeed makes the animation faster, lower makes it slower
+        adjusted_frame_delay = self.frame_delay / self.current_animspeed
+
+        # Check if enough time has passed to change the frame
+        if current_time - self.last_frame_time > adjusted_frame_delay:
+            self.current_frame_index = (self.current_frame_index + 1) % len(self.animation_frames)
+            self.last_frame_time = current_time
+
+        try:
+            # Get the current animation frame
+            frame = self.animation_frames[self.current_frame_index]
+
+            # Flip the frame horizontally if the player is facing left
+            if not self.facing_right:
+                frame = pygame.transform.flip(frame, True, False)
+
+            # Scale the frame if needed
+            if self.player_scale != 1:
+                frame_width = int(frame.get_width() * self.player_scale)
+                frame_height = int(frame.get_height() * self.player_scale)
+                frame = pygame.transform.scale(frame, (frame_width, frame_height))
+
+            # Blit the current frame to the screen
+            screen.blit(frame, (position.x + (PLAYER_WIDTH * self.player_scale) // 2 - frame.get_width() // 2, position.y + (PLAYER_HEIGHT * self.player_scale) // 2 - frame.get_height() // 2))
+        
+        except Exception as e:
+            print(f"Error rendering animation: {e}")
+            pass
+
+    def override_animation(self, animation_name: str, animspeed: int = 1):
+        """Override any current animation with the given animation."""
+        if self.animation_in_progress == True:
+            return
+        self.animation_in_progress = True
+        self.current_animation = animation_name
+        self.current_frame_index = 0
+        self.last_frame_time = pygame.time.get_ticks()
+        self.current_animspeed = animspeed
+        self.animate(animation_name)
+
+    def update_animation_state(self):
+        """Checks if the current animation (sword swing or other) has finished."""
+        if self.current_frame_index == len(self.animation_frames) - 1:
+            # Animation is complete, allow other animations to play again
+            self.animation_in_progress = False
+            self.current_animspeed = 1
+            self.current_animation = "Idle"  # Revert to idle after swing
 
     def connectToServer(self, ip: str = "127.0.0.1", port: int = 44200):
         """Creates a network client and attempts to connect to the given server"""
@@ -242,14 +436,35 @@ class GameClient():
         self.networkClient = NetworkClient(self, ip, port)
 
     def logout(self):
-            """Resets the game state and disconnects from the server."""
-            self.position = pygame.Vector2(0, 0)
-            self.velocity = 5
-            self.velocity_y = 0
-            self.worldObjects = [] 
-            self.server_data = None 
+        """Resets the game state and disconnects from the server."""
+        # Reset player position and movement
+        self.position = pygame.Vector2(0, 0)
+        self.velocity = 5  # Reset horizontal movement speed
+        self.velocity_y = 0  # Reset vertical velocity (gravity impact)
+        self.grounded = False  # The player is not grounded initially
+        self.movement_disabled = False  # Reset to allow movement
+        
+        # Reset inventory, weapon, and animation states
+        self.current_weapon = None  # Unequip any equipped weapon
+        self.current_animation = "Idle"  # Reset to default idle animation
+        self.current_frame_index = 0  # Reset animation frame index
+        self.last_frame_time = pygame.time.get_ticks()  # Reset frame timing
+        self.animation_in_progress = False  # No animation in progress
+        self.current_animspeed = 1  # Reset animation speed to default
 
-            self.disconnectFromServer()
+        # Reset world state
+        self.worldObjects = []  # Clear any world objects
+        self.server_data = None  # Clear server data
+        self.message = None  # Clear any server messages
+
+        # Reset connection info
+        self.connInfo = {
+            "ip": None,
+            "port": None
+        }
+
+        # Reset networking state
+        self.disconnectFromServer()
 
     def connectionInfo(self) -> tuple[str, int]:
         """Returns the GameClient's server connection info"""
@@ -262,73 +477,135 @@ class GameClient():
         self.networkClient.network_thread.join()
 
     def detect_collision(self):
-        player_rect = pygame.Rect(SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2, PLAYER_WIDTH, PLAYER_HEIGHT)
+        if not self.server_data or self.server_data == {}:
+            return
         try:
             terrain = self.server_data.terrain
-            self.grounded = False
+            player_x = self.position.x
+            player_bottom_y = self.position.y + (PLAYER_HEIGHT * self.player_scale) // 2
+            player_top_y = self.position.y - (PLAYER_HEIGHT * self.player_scale) // 2
+            player_width = PLAYER_WIDTH * self.player_scale
 
-            for i in range(len(terrain) - 1):
-                line_start = pygame.Vector2(terrain[i])
-                line_end = pygame.Vector2(terrain[i + 1])
+            closest_building_top = None
+            horizontal_collision = False
+            player_new_x = self.position.x  # Store the player's new x position in case of horizontal collision
 
-                # Convert to screen coordinates for collision detection
-                screen_line_start = CalculateScreenPosition(line_start, self.position)
-                screen_line_end = CalculateScreenPosition(line_end, self.position)
+            # Loop through each building to check for collision
+            for building in terrain:
+                # Building is a list of four points: [top-left, top-right, bottom-right, bottom-left]
+                top_left = pygame.Vector2(building[0])
+                top_right = pygame.Vector2(building[1])
+                bottom_left = pygame.Vector2(building[3])
+                
+                # Horizontal Collision Detection (blocking sides)
+                if player_top_y <= top_left.y and player_bottom_y >= bottom_left.y:
+                    # The player's top and bottom are within the vertical bounds of the building
 
-                if line_rect_collision(screen_line_start, screen_line_end, player_rect):
-                    slope = (line_end.y - line_start.y) / (line_end.x - line_start.x + 0.01)
-                    # Smooth player movement based on slope
-                    target_y = min(line_start.y, line_end.y) - PLAYER_HEIGHT // 2
+                    if player_x + player_width > top_left.x and player_x < top_left.x:
+                        # Player is hitting the left side of the building
+                        player_new_x = top_left.x - player_width  # Prevent moving through the left side
+                        horizontal_collision = True
+                    elif player_x < top_right.x and player_x + player_width > top_right.x:
+                        # Player is hitting the right side of the building
+                        player_new_x = top_right.x  # Prevent moving through the right side
+                        horizontal_collision = True
 
-                    buffer = 5  # A small buffer of 5 pixels for detection
-                    if self.position.y + buffer >= target_y:  
-                        self.grounded = True
+                # If the player is within the horizontal bounds of the building, check for grounding
+                if top_left.x <= player_x <= top_right.x:
+                    # The player is within the horizontal bounds of the building
 
-                    # Smooth snapping to ground
-                    self.position.y += (target_y - self.position.y) * 0.2
+                    # Top of the building is the Y value of the top-left point
+                    building_top_y = top_left.y
 
-                    # Adjust velocity based on slope (reduce gravity effect when climbing)
-                    if abs(slope) > 0:
-                        self.velocity_y = -self.velocity * slope * 0.5 
+                    # If this is the closest building top that the player can land on
+                    if closest_building_top is None or building_top_y > closest_building_top:
+                        closest_building_top = building_top_y
 
-                    # Stop falling when grounded
-                    if abs(self.position.y - target_y) < 1:  # Small tolerance to ensure proper grounding
-                        self.velocity_y = 0
-                    return True
+            # Update the player's position if there was horizontal collision
+            if horizontal_collision:
+                self.position.x = player_new_x
 
-            return False
-        except:
+            # Now that we have the closest building top, check if the player is grounded on it
+            if closest_building_top is not None and not horizontal_collision:
+                buffer = 1  # Small buffer to avoid "floating"
+                if player_bottom_y >= closest_building_top - buffer:
+                    self.grounded = True
+                    # Adjust the player's position so that the bottom of the player is at ground level
+                    self.position.y = closest_building_top - (PLAYER_HEIGHT * self.player_scale) // 2
+                else:
+                    self.grounded = False
+            else:
+                self.grounded = False
+
+            return self.grounded
+
+        except Exception as e:
+            print(f"Error detecting collision: {e}")
             return False
 
     def apply_gravity(self, dt):
         if not self.grounded:
-            self.velocity_y += GRAVITY * dt
-            self.position.y += self.velocity_y * dt
+            # Calculate the next position if gravity were applied
+            next_velocity_y = self.velocity_y + GRAVITY * dt
+            next_position_y = self.position.y + next_velocity_y * dt
+
+            # Check if moving to this next position would cause a collision
+            self.position.y = next_position_y
+            if self.detect_collision():
+                # If collision detected, adjust position to the ground level and reset velocity
+                self.velocity_y = 0
+                self.grounded = True
+            else:
+                # If no collision, update the velocity for the next frame
+                self.velocity_y = next_velocity_y
         else:
-            self.velocity_y = 0  # Reset vertical velocity if grounded
+            # If grounded, reset vertical velocity to 0 (with a small threshold to avoid jitter)
+            if abs(self.velocity_y) < 0.5:
+                self.velocity_y = 0
+            self.grounded = True
 
     def handleMovement(self, keys):
-        if self.movement_disabled:
+        if self.movement_disabled or self.animation_in_progress:
             return
 
         moveVector = pygame.Vector2(0, 0)
-        
+        moving = False
+        jumping = False
+        falling = False
+
         # Horizontal movement
         if keys[pygame.K_a]:
             moveVector.x -= self.velocity
+            self.facing_right = False  # Facing left
+            moving = True
         if keys[pygame.K_d]:
             moveVector.x += self.velocity
+            self.facing_right = True  # Facing right
+            moving = True
 
         # Update the player's position with movement boundaries
-        #TODO: Fix boundaries
-        ## I don't understand this TODO anymore
-        self.position.x = max(-3000, min(3000, self.position.x + moveVector.x))
+        self.position.x = max(-2800, min(2800, self.position.x + moveVector.x))
 
         # Jumping logic
         if keys[pygame.K_SPACE] and self.grounded:
-            self.velocity_y = -65 * self.velocity
-            self.grounded = False
+            jumping = True
+            self.velocity_y = -65 * self.velocity  # Jumping sets a strong upward velocity
+            self.grounded = False  # Player is no longer grounded when jumping
 
+        # Falling logic: Detect when the player is falling
+        if self.velocity_y > 0 and not self.grounded:
+            falling = True
+
+        # Animation handling
+        if jumping:
+            self.animate("Jump")
+        elif falling:
+            self.animate("Fall")
+        elif moving and self.grounded:
+            self.animate("Run")
+        elif self.grounded:
+            self.animate("Idle")    
+        
     def get_slope_factor(self):
         """ Returns a factor between 0 (steep climb) and 1 (flat or downhill) """
         player_rect = pygame.Rect(SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2, SCREEN_HEIGHT // 2 - PLAYER_HEIGHT // 2, PLAYER_WIDTH, PLAYER_HEIGHT)
@@ -351,15 +628,24 @@ class GameClient():
 
         return 1  # Default gravity effect
 
-    def draw(self, screen):
-        # always draw the player at 0,0 (center of screen, not actual 0,0). move world around player to emulate camera
-        player = pygame.draw.rect(screen, BLUE, pygame.Rect(SCREEN_WIDTH//2 - PLAYER_WIDTH//2, SCREEN_HEIGHT//2 - PLAYER_HEIGHT//2, PLAYER_WIDTH, PLAYER_HEIGHT))
+    def draw(self, screen, debugger: 'Debugger'):
+        # Define the player's central position for animation
+        player_x = SCREEN_WIDTH // 2 - ((PLAYER_WIDTH * self.player_scale) // 2)
+        player_y = SCREEN_HEIGHT // 2 - ((PLAYER_HEIGHT * self.player_scale) // 2)
 
-        # render the player's name above the player
-        font = pygame.font.SysFont(None, 40)
-        text = font.render(self.username, True, BLACK)
-        text_rect = text.get_rect(center=(player.x + PLAYER_WIDTH//2, player.y - 20))
-        screen.blit(text, text_rect)
+        # Create the hitbox rectangle
+        hitbox_rect = pygame.Rect(player_x, player_y, PLAYER_WIDTH * self.player_scale, PLAYER_HEIGHT * self.player_scale)
+
+        # Delegate hitbox drawing to the debugger
+        if debugger.show_debug:
+            debugger.draw_hitbox(screen, hitbox_rect, self.username)
+
+        # Adjust the position for the animation to center it on the hitbox
+        animation_x = player_x
+        animation_y = player_y 
+
+        # Draw the player’s animation at the adjusted position
+        self.play_animation(screen, pygame.Vector2(animation_x, animation_y))
 
     def drawWorldObjects(self, screen):
         for obj in self.worldObjects:
@@ -372,50 +658,95 @@ class GameClient():
                 pygame.draw.rect(screen, obj.color, (screenPosition.x - obj.width // 2, screenPosition.y - obj.height // 2, obj.width, obj.height))
 
     def drawTerrain(self, screen):
+        if not self.server_data or self.server_data == {}:
+            return
         try:
-            terrain = self.server_data.terrain
-            adjusted_points: List[pygame.Vector2] = [CalculateScreenPosition(pygame.Vector2(x, y), self.position) for x, y in terrain]
-            lowered_points = [pygame.Vector2(x+150, y+150) for x, y in adjusted_points]
-            # basically draw the terrain to the bottom of the screen
-            # consider fullscreen being 60 taller
-            adjusted_points.append((adjusted_points[-1][0], SCREEN_HEIGHT))
-            adjusted_points.append((adjusted_points[0][0], SCREEN_HEIGHT))
+            # Get the terrain (list of buildings, each building is a list of four points)
+            buildings = self.server_data.terrain
 
-            if fullscreen == False:
-                lowered_points.append((lowered_points[-1][0], SCREEN_HEIGHT))
-                lowered_points.append((lowered_points[0][0], SCREEN_HEIGHT))
-            else:
-                lowered_points.append((lowered_points[-1][0], SCREEN_HEIGHT + 60))
-                lowered_points.append((lowered_points[0][0], SCREEN_HEIGHT + 60))
+            for building in buildings:
+                # Adjust each point in the building to the player's screen position
+                adjusted_points = [CalculateScreenPosition(pygame.Vector2(x, y), self.position) for x, y in building]
 
-            pygame.draw.polygon(screen, DARK_GREEN, adjusted_points)
-            pygame.draw.polygon(screen, DIRT_BROWN, lowered_points)
-        except:
-            pass
+                # Draw each building as a separate polygon
+                pygame.draw.polygon(screen, DARK_GREY, adjusted_points)
+
+        except Exception as e:
+            print(f"Error drawing terrain: {e}")
 
     def drawOtherClients(self, screen):
         if not self.server_data:
             return
         
-        clients_data = json.loads(self.server_data.clients_data)
-        for client in clients_data:
-            if clients_data[client] == None:
+        clients_data = self.server_data.clients_data  # clients_data is already a dict
+
+        for client_key, client in clients_data.items():
+            if client_key == self.networkClient.host: # ignore yourself
                 continue
-            client = json.loads(clients_data[client])
+            client_data = clients_data[client_key]
+            if client_data is None:
+                continue
 
-            clientPosition = client['position']
-            screenPosition = CalculateScreenPosition(pygame.Vector2(clientPosition['x'], clientPosition['y']), self.position)
+            # Assuming client_data['gameData'] is a GameData object
+            game_data = client['gameData']
 
-            # Draw the other client's representation (e.g., a rectangle)
-            player = pygame.draw.rect(screen, GREEN, (
-                screenPosition.x - PLAYER_WIDTH // 2,
-                screenPosition.y - PLAYER_HEIGHT // 2,
-                PLAYER_WIDTH, PLAYER_HEIGHT
-            ))
+            # Extract client-specific data
+            client_position: Position = client['position']
+            client_facing_right = game_data.facing_right
+            client_username = client['username']
+            client_current_animation = game_data.current_animation
+            client_current_frame_index = game_data.current_frame_index
+            client_last_frame_time = game_data.last_frame_time
+            client_player_scale = game_data.player_scale
 
+            # Convert client world position to screen position
+            screen_position = CalculateScreenPosition(pygame.Vector2(client_position.x, client_position.y), self.position)
+
+            # Load the client's animation frames based on their current animation state
+            sprite_sheet_path = f"{sprites_folder}/Player/{client_current_animation}.png"
+            sprite_sheet = pygame.image.load(sprite_sheet_path).convert_alpha()
+            sheet_width, sheet_height = sprite_sheet.get_size()
+            client_animation_frames = []
+
+            # Split the sprite sheet into frames
+            for y in range(0, sheet_height, 150):
+                for x in range(0, sheet_width, 150):
+                    frame = sprite_sheet.subsurface((x, y, 150, 150))
+                    client_animation_frames.append(frame)
+
+            # Calculate the frame delay (using the default frame delay for the player, you can adjust this if needed)
+            frame_delay = self.frame_delay
+
+            # Adjust frame timing based on the client's last frame time
+            current_time = pygame.time.get_ticks()
+            if current_time - client_last_frame_time > frame_delay:
+                client_current_frame_index = (client_current_frame_index + 1) % len(client_animation_frames)
+                client_last_frame_time = current_time
+            
+            # Get the current frame of the client's animation
+            try:
+                frame = client_animation_frames[client_current_frame_index]
+
+                # Flip the frame horizontally if the client is facing left
+                if not client_facing_right:
+                    frame = pygame.transform.flip(frame, True, False)
+
+                # Scale the frame to the client's scale factor
+                if client_player_scale != 1:
+                    frame_width = int(frame.get_width() * client_player_scale)
+                    frame_height = int(frame.get_height() * client_player_scale)
+                    frame = pygame.transform.scale(frame, (frame_width, frame_height))
+
+                # Blit the current frame to the screen at the adjusted position
+                screen.blit(frame, (screen_position.x + (PLAYER_WIDTH * client_player_scale) // 2 - frame.get_width() // 2, 
+                                    screen_position.y + (PLAYER_HEIGHT * client_player_scale) // 2 - frame.get_height() // 2))
+            except Exception as e:
+                print(f"Error rendering client animation: {e}")
+
+            # Render the username above the client
             font = pygame.font.SysFont(None, 40)
-            text = font.render(client['username'], True, BLACK)
-            text_rect = text.get_rect(center=(player.x + PLAYER_WIDTH//2, player.y - 20))
+            text = font.render(client_username, True, BLACK)
+            text_rect = text.get_rect(center=(screen_position.x + PLAYER_WIDTH // 2, screen_position.y - 20))
             screen.blit(text, text_rect)
 
     def spawn(self, spawn_x: int = 0, spawn_height: int = 100):
@@ -426,35 +757,97 @@ class GameClient():
         self.velocity_y = 0
         self.grounded = False
 
-    def equip_weapon(self, weapon: 'Weapon'):
-        """Equips a weapon for the player."""
-        if self.current_weapon:
-            self.current_weapon.unequipped(self)
-        self.current_weapon = weapon
-        self.current_weapon.equipped(self)
-
-    def unequip_weapon(self):
-        """Unequips the current weapon, if any."""
-        if self.current_weapon:
-            self.current_weapon.unequipped(self)
-            self.current_weapon = None
-
     def activate_weapon(self):
         """Activates the currently equipped weapon, if any."""
-        if self.current_weapon:
-            self.current_weapon.activated(self)
+        if self.current_weapon and not self.animation_in_progress:
+            global volume
+            anim = self.current_weapon.activated(self)
+            self.override_animation(anim, animspeed=self.current_weapon.anim_speed)
+            pygame.mixer.Sound(f"{sound_folder}\\SFX\\{self.current_weapon.sfx}.mp3").play().set_volume(volume)
+            
+            # Create the weapon hitbox and store it for rendering during animation
+            self.weapon_hitbox = self._create_weapon_hitbox()
+            self.animation_in_progress = True  # The animation has started
+            
+            # Reset hit objects for the new attack
+            self.hit_objects = {}
+
+    def _create_weapon_hitbox(self):
+        """Creates a hitbox based on the player's current weapon and position, adjusting for screen offset."""
+        weapon_range = self.current_weapon.range
+        if self.facing_right:
+            # Create the hitbox in front of the player
+            hitbox_position = pygame.Vector2(
+                self.position.x + (PLAYER_WIDTH // 2),  # In front of the player
+                self.position.y - (PLAYER_HEIGHT // 2)  # Vertically centered on the player
+            )
+        else:
+            # Create the hitbox to the left of the player
+            hitbox_position = pygame.Vector2(
+                self.position.x - (PLAYER_WIDTH // 2) - weapon_range,  # Behind the player
+                self.position.y - (PLAYER_HEIGHT // 2)  # Vertically centered on the player
+            )
+        screen_position = CalculateScreenPosition(hitbox_position, self.position)
+        hitbox = pygame.Rect(
+            screen_position.x,  # Hitbox x position
+            screen_position.y,  # Hitbox y position
+            weapon_range,       # Hitbox width (weapon range)
+            PLAYER_HEIGHT       # Hitbox height (player height)
+        )
+
+        return hitbox
+
+    def _check_hitbox_intersections(self, hitbox):
+        """Checks for intersections between the weapon hitbox, world objects, and enemies."""
+        hit_objects = {}
+
+        # Check intersections with enemies
+        for id, enemy in self.server_data.enemy_data.items():
+            if id in self.already_hit:
+                continue
+            else:
+                self.already_hit.append(id)
+            # Retrieve the enemy's position and size directly from the server data
+            enemy_screen_pos = CalculateScreenPosition(pygame.Vector2(enemy['position'].x, enemy['position'].y), self.position)
+            enemy_size = enemy.get('size', 128)  # Default to 128 if no size is provided by server data
+            
+            # Adjust the enemy hitbox creation based on actual enemy size
+            enemy_hitbox = pygame.Rect(
+                enemy_screen_pos.x - (enemy_size // 2),
+                enemy_screen_pos.y - (enemy_size // 2),
+                enemy_size,
+                enemy_size
+            )
+            
+            # Draw the enemy hitbox for debugging
+            debugger.draw_weapon_hitbox(screen, enemy_hitbox)
+            
+            # Check if the enemy's hitbox collides with the weapon's hitbox
+            if hitbox.colliderect(enemy_hitbox):
+                hit_objects[id] = enemy
+
+        return hit_objects
 
     def update(self, screen, dt):
         self.apply_gravity(dt)
-        self.handleMovement(pygame.key.get_pressed())
         self.detect_collision()
+        self.handleMovement(pygame.key.get_pressed())
 
         if self.position.y > SCREEN_HEIGHT:  # If the player falls too far
             self.spawn(100)
 
+        if self.animation_in_progress:
+            self.weapon_hitbox = self._create_weapon_hitbox()
+            self.hit_objects = self._check_hitbox_intersections(self.weapon_hitbox)
+            # deal_to = self.current_weapon.apply_damage(self.hit_objects)
+            debugger.draw_weapon_hitbox(screen, self.weapon_hitbox)
+        else:
+            self.weapon_hitbox = None  # Clear hitbox when animation ends
+
+        self.update_animation_state()  # Check if current animation has finished
         self.drawTerrain(screen)
         self.drawWorldObjects(screen)
-        self.draw(screen)
+        self.draw(screen, debugger)
         self.drawOtherClients(screen)
 
 class Message(ABC):
@@ -499,7 +892,21 @@ class ServerMessage(Message):
                 newClient.disconnectFromServer()
                 return
 
-newClient = GameClient(GameData(HP=100), "User1", pygame.Vector2(0, 0))
+newClientBaseData = GameData(
+    HP=100,
+    facing_right=True,
+    current_animation="Idle",
+    current_frame_index=0,
+    last_frame_time=0,
+    player_scale=3,
+    velocity=0,
+    velocity_y=0,
+    grounded=False,
+    movement_disabled=False,
+    current_weapon=None,
+    animation_in_progress=False
+)
+newClient = GameClient(newClientBaseData, "User1", pygame.Vector2(0, 0))
 
 ## Debug
 class Debugger:
@@ -514,11 +921,6 @@ class Debugger:
         self.fps_samples = deque(maxlen=max_fps_samples)
         self.last_time = time.time()
         
-        # Key tracking
-        self.key_states: Dict[int, DebugKeyState] = {}
-        self.key_history: List[Tuple[int, str, float]] = []
-        self.max_key_history = 10
-        
         # Performance metrics
         self.frame_times = deque(maxlen=60)
         self.last_frame_time = time.time()
@@ -527,10 +929,24 @@ class Debugger:
         self.last_ping: Optional[str] = None
         self.ping_interval = 2.0
         self.last_ping_time = 0
-    
+
+    def draw_hitbox(self, screen, player_rect, username):
+        """Draw the hitbox and username if hitbox display is enabled"""
+        
+        # Draw the hollow rectangle for the player's hitbox
+        pygame.draw.rect(screen, BLUE, player_rect, 2)
+
+        # Render the player's name above the hitbox
+        font = pygame.font.SysFont(None, 40)
+        text = font.render(username, True, BLACK)
+        text_rect = text.get_rect(center=(player_rect.centerx, player_rect.y - 20))
+        screen.blit(text, text_rect)
+
     def ping_server(self, hostname: str, port: int) -> str:
         """Ping server and return latency in milliseconds"""
         try:
+            if not hostname or not port:
+                return None
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(2)
 
@@ -587,35 +1003,33 @@ class Debugger:
         y_offset += self.font_size * 1.5
         
         # Display connected clients from newClient.allClients
-        try:
-            clients_data = json.loads(newClient.server_data.clients_data)
-            for client in clients_data:
-                # Convert string to dictionary
-                if clients_data[client] == None:
-                    continue
-                client_data = json.loads(clients_data[client])
-                username = client_data["username"]
+        server_data = newClient.server_data  # clients_data is already a dict
+
+        if not server_data:
+            return
+        for client_key, client in server_data.clients_data.items():
+            if client is None:
+                return
+            if client_key == newClient.networkClient.host: # ignore yourself
+                continue
+            
+            username = client["username"]
+            
+            # Display client info
+            client_lines = [
+                f"User: {username}",
+                f"IP: {client_key}",
+                "---"
+            ]
+            
+            for line in client_lines:
+                text_surface = self.font.render(line, True, self.text_color)
+                screen.blit(text_surface, (x_offset, y_offset))
+                y_offset += self.font_size
+            
+            # Add spacing between clients
+            y_offset += self.font_size // 2
                 
-                # Display client info
-                client_lines = [
-                    f"User: {username}",
-                    f"IP: {client}",
-                    "---"
-                ]
-                
-                for line in client_lines:
-                    text_surface = self.font.render(line, True, self.text_color)
-                    screen.blit(text_surface, (x_offset, y_offset))
-                    y_offset += self.font_size
-                
-                # Add spacing between clients
-                y_offset += self.font_size // 2
-                
-        except AttributeError:
-            # Handle case where allClients might not be available
-            error_text = self.font.render("No client data available", True, self.text_color)
-            screen.blit(error_text, (x_offset, y_offset))
-    
     def update_fps(self) -> float:
         """Update and return current FPS"""
         current_time = time.time()
@@ -632,75 +1046,13 @@ class Debugger:
         """Toggle debug overlay visibility"""
         self.show_debug = not self.show_debug
     
-    def track_key_event(self, event: pygame.event.Event) -> None:
-        """Track key press/release events and durations"""
-        current_time = time.time()
-        
-        if event.type == pygame.KEYDOWN:
-            if event.key not in self.key_states:
-                self.key_states[event.key] = DebugKeyState(
-                    is_pressed=True,
-                    press_time=current_time,
-                    release_time=0,
-                    hold_duration=0,
-                    press_count=1
-                )
-            else:
-                self.key_states[event.key].is_pressed = True
-                self.key_states[event.key].press_time = current_time
-                self.key_states[event.key].press_count += 1
-            
-            self.key_history.append((event.key, "pressed", current_time))
-        
-        elif event.type == pygame.KEYUP:
-            if event.key in self.key_states:
-                state = self.key_states[event.key]
-                state.is_pressed = False
-                state.release_time = current_time
-                state.hold_duration = current_time - state.press_time
-            
-            self.key_history.append((event.key, "released", current_time))
-        
-        while len(self.key_history) > self.max_key_history:
-            self.key_history.pop(0)
-    
-    def get_active_keys(self) -> List[str]:
-        """Return list of currently held keys"""
-        return [pygame.key.name(key) for key, state in self.key_states.items() 
-                if state.is_pressed]
-    
-    def get_key_stats(self, key: int) -> Optional[DebugKeyState]:
-        """Get detailed stats for a specific key"""
-        return self.key_states.get(key)
-    
-## Pygame setup
-pygame.init()
-pygame.mixer.init()
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags=pygame.FULLSCREEN)
-current_scene = None
-clock = pygame.time.Clock()
-running = True
-dt = 0
+    def draw_weapon_hitbox(self, screen, hitbox):
+        """Draw the weapon's hitbox for debugging purposes."""
+        if self.show_debug and hitbox:
+            # Draw the hitbox as a red rectangle
+            pygame.draw.rect(screen, (255, 0, 0), hitbox, 2)  # Red color, border width 2
+
 debugger = Debugger()
-
-# Load sounds
-sound_folder = Path(__file__).parent / 'Sound'
-music_folder = sound_folder / 'Music'
-sfx_folder = sound_folder / 'SFX'
-
-# Menu GFX
-sprites_folder = Path(__file__).parent / 'Sprites'
-
-current_music = None
-
-def SwitchMusic(newMusic, looped: bool):
-    global current_music
-    pygame.mixer.music.load(f"{music_folder}/{newMusic}")
-    if looped:   
-        pygame.mixer.music.play(loops=-1)
-    else:
-        pygame.mixer.music.play()
-    current_music = newMusic
 
 ### Pygame Functions
 
@@ -715,6 +1067,7 @@ class Menu(ABC):
         self.options = options
         self.font_size = font_size
         self.active_option = None
+        self.option_rects = []
 
     @abc.abstractmethod
     def on_select(self, selected_option: int):
@@ -743,60 +1096,202 @@ class Menu(ABC):
             screen.blit(option_surf, option_rect)
 
 class InventoryMenu(Menu):
-    def __init__(self, inventory_items: list, columns: int = 5, rows: int = 5, cell_size: int = 64, padding: int = 10):
+    def __init__(self, client, cell_size: int = 64, padding: int = 10):
+        inventory_items = [  # (Item, Amount) tuples
+            [(Sword("Iron Sword", "SwordAttack", "SwordSwing"), 1)],
+            [],
+            [(Spear("Spear", "SpearAttack", "SpearThrust"), 3)],
+            [(Sword("Great Sword", "GreatswordAttack", "SwordSwingBeefy", anim_speed=.75, damage=45, range=200), 3)],
+            [],
+        ]
+
+        # Ensure each row has the correct number of columns (filling with empty slots)
+        for row in inventory_items:
+            while len(row) < 5:
+                row.append((None, 0))
+
         super().__init__(title="Inventory", options=inventory_items)
-        self.columns = columns
-        self.rows = rows
+        self.columns = 5
+        self.rows = 5
         self.cell_size = cell_size
         self.padding = padding
         self.position = (0, 0)
+        self.client = client
+        self.visible = False
+        self.arrow_rect = pygame.Rect(0, 0, 50, 50)
+        self.icon_cache = {}
+        self.option_rects = []
+
+    def add_item(self, item, amount: int):
+        """Adds an item to the inventory, or increases its amount if it already exists."""
+        # Check if the item is already in the inventory
+        for row in self.options:
+            for i, (existing_item, existing_amount) in enumerate(row):
+                if existing_item == item:
+                    # If the item already exists, increase the amount
+                    row[i] = (existing_item, existing_amount + amount)
+                    return
+
+        # If the item is not found, add it to the first available empty slot
+        for row in self.options:
+            for i, (existing_item, existing_amount) in enumerate(row):
+                if existing_item is None:
+                    row[i] = (item, amount)
+                    return
+
+    def remove_item(self, item, amount: int):
+        """Removes an amount of an item from the inventory. If the amount reaches zero, the item remains but with 0 quantity."""
+        for row in self.options:
+            for i, (existing_item, existing_amount) in enumerate(row):
+                if existing_item == item:
+                    # Decrease the amount and set it to 0, but don't remove the item
+                    new_amount = max(0, existing_amount - amount)
+                    row[i] = (existing_item, new_amount)
+                    return
+
+    def load_icon(self, item):
+        """Loads the icon for an item and caches it for future use."""
+        if item.icon not in self.icon_cache:
+            icon_surface = pygame.image.load(f"{sprites_folder}/Items/{item.icon}").convert_alpha()
+            icon_surface = pygame.transform.scale(icon_surface, (self.cell_size - 10, self.cell_size - 10))  # Scale the icon to fit the cell
+            self.icon_cache[item.icon] = icon_surface
+        return self.icon_cache[item.icon]
 
     def set_position(self, screen):
-        self.position = (screen.get_width() - (self.columns * (self.cell_size + self.padding)) - 20, screen.get_height() - (self.rows * (self.cell_size + self.padding)) - 20)
+        """Sets the position of the inventory and arrow button on the screen."""
+        # Set the position of the inventory based on the screen size
+        self.position = (
+            screen.get_width() - (self.columns * (self.cell_size + self.padding)) - 20,
+            screen.get_height() - (self.rows * (self.cell_size + self.padding)) - 20
+        )
 
-    def on_select(self, selected_option: int):
-        selected_item = self.options[selected_option]
-        print(f"Selected item: {selected_item}")
+        # Set the position of the arrow just to the left of the inventory
+        self.arrow_rect.x = self.position[0] - 60  # Place the arrow 60 pixels to the left of the inventory
+        self.arrow_rect.y = self.position[1] - 10  # Align the arrow with the top of the inventory
+
+    def on_select(self, row_idx: int, col_idx: int):
+        """Handles selection of an inventory item for equipping without using it."""
+        selected_item, amount = self.options[row_idx][col_idx]
+        
+        # Check if an item is selected and has quantity
+        if selected_item and amount > 0:
+            if self.client.current_weapon:
+                if self.client.current_weapon == selected_item:
+                    return
+                self.client.current_weapon.unequipped(self.client)
+            self.remove_item(selected_item, 1)
+            selected_item.equipped(self.client)
+            self.client.just_equipped = True  # Track that an item was just equipped
+
+    def toggle_inventory(self):
+        """Toggles the visibility of the inventory."""
+        self.visible = not self.visible
 
     def render(self, screen):
+        # Always render the toggle arrow button, regardless of inventory visibility
         self.set_position(screen)
+        self._draw_toggle_arrow(screen)
 
-        # Create a transparent surface for the inventory background
+        # If inventory is not visible, return here after drawing the arrow
+        if not self.visible:
+            return
+
+        # Render the inventory when it's visible
+        self.set_position(screen)
+        self._draw_inventory_background(screen)
+
+        # Clear previous option rectangles (click detection areas)
+        self.option_rects.clear()
+
+        # Iterate through the inventory items and render them
+        for row_idx, row in enumerate(self.options):
+            for col_idx, (option, amount) in enumerate(row):
+                if option is not None:
+                    self._render_item_cell(screen, row_idx, col_idx, option, amount)
+
+    def _draw_toggle_arrow(self, screen):
+        """Draws the arrow that toggles the inventory."""
+        pygame.draw.rect(screen, (255, 255, 255), self.arrow_rect)
+        arrow = ">" if not self.visible else "<"
+        arrow_font = pygame.font.SysFont(None, 50)
+        arrow_surf = arrow_font.render(arrow, True, (0, 0, 0))
+        screen.blit(arrow_surf, (self.arrow_rect.x + 15, self.arrow_rect.y + 5))
+
+    def _draw_inventory_background(self, screen):
+        """Draws the semi-transparent background for the inventory."""
         background_width = self.columns * (self.cell_size + self.padding) + 20
         background_height = self.rows * (self.cell_size + self.padding) + 20
         background = pygame.Surface((background_width, background_height), pygame.SRCALPHA)
-        background.fill((0, 0, 0, 128))  # Semi-transparent background
-
-        # Blit the background onto the screen
+        background.fill((0, 0, 0, 128))
         screen.blit(background, (self.position[0] - 10, self.position[1] - 10))
 
-        font = pygame.font.SysFont(None, 30)
+    def _render_item_cell(self, screen, row_idx, col_idx, option, amount):
+        """Renders a single cell in the inventory grid."""
+        x = self.position[0] + col_idx * (self.cell_size + self.padding)
+        y = self.position[1] + row_idx * (self.cell_size + self.padding)
 
-        # Calculate grid placement
-        self.option_rects = []
-        for idx, option in enumerate(self.options):
-            col = idx % self.columns
-            row = idx // self.columns
-            x = self.position[0] + col * (self.cell_size + self.padding)
-            y = self.position[1] + row * (self.cell_size + self.padding)
+        # Draw the cell rectangle
+        cell_rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
 
-            # Draw the cell as a rectangle
-            cell_rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
-            pygame.draw.rect(screen, (255, 255, 255), cell_rect, 2)
+        # Only draw the border and content if there is an item
+        if option:
+            self._draw_cell_border(screen, cell_rect, option)
 
-            # Render the item (text-based placeholder for now)
-            option_surf = font.render(option, True, (255, 255, 255))
+            # Draw item icon, name, and amount
+            self._draw_item_icon(screen, cell_rect, option)
+            self._draw_item_name(screen, cell_rect, option)
+            self._draw_item_amount(screen, cell_rect, amount)
+
+        # Store the cell position for click detection regardless of content
+        self.option_rects.append((cell_rect, row_idx, col_idx))
+
+    def _draw_cell_border(self, screen, cell_rect, option):
+        """Draws the border of the inventory cell if the item is present."""
+        if option == self.client.current_weapon:
+            pygame.draw.rect(screen, (255, 215, 0), cell_rect, 4)  # Golden border for equipped weapon
+        else:
+            pygame.draw.rect(screen, (255, 255, 255), cell_rect, 2)  # Regular border
+
+    def _draw_item_icon(self, screen, cell_rect, option):
+        """Draws the icon for the item in the inventory."""
+        # Cache icon and avoid reloading/resizing each frame
+        if option and option.icon:
+            icon_surface = self.icon_cache.get(option.icon)
+            if not icon_surface:
+                # Load and scale the icon only once, cache it
+                icon_surface = pygame.image.load(f"{sprites_folder}/Items/{option.icon}").convert_alpha()
+                icon_surface = pygame.transform.scale(icon_surface, (self.cell_size - 10, self.cell_size - 10))
+                self.icon_cache[option.icon] = icon_surface
+            icon_rect = icon_surface.get_rect(center=cell_rect.center)
+            screen.blit(icon_surface, icon_rect)
+
+    def _draw_item_name(self, screen, cell_rect, option):
+        """Draws the name of the item in the inventory."""
+        if option and option.name:
+            option_font = pygame.font.SysFont(None, 30)
+            option_surf = option_font.render(option.name, True, (255, 255, 255))
             option_rect = option_surf.get_rect(center=cell_rect.center)
             screen.blit(option_surf, option_rect)
 
-            self.option_rects.append(cell_rect)
+    def _draw_item_amount(self, screen, cell_rect, amount):
+        """Draws the amount of the item in the inventory."""
+        if amount > 0:
+            amount_font = pygame.font.SysFont(None, 24)
+            amount_surf = amount_font.render(str(amount), True, (255, 255, 255))
+            amount_rect = amount_surf.get_rect(topright=(cell_rect.right - 5, cell_rect.top + 5))
+            screen.blit(amount_surf, amount_rect)
 
     def handle_mouse_input(self, mouse_pos, mouse_click):
-        for idx, option_rect in enumerate(self.option_rects):
-            if option_rect.collidepoint(mouse_pos):
-                self.active_option = idx
-                if mouse_click[0]:
-                    self.on_select(idx)
+        """Handles mouse input for toggling the inventory and selecting items."""
+        # Check if the arrow button was clicked
+        if self.arrow_rect.collidepoint(mouse_pos) and mouse_click == 1:
+            self.toggle_inventory()
+
+        if self.visible:
+            # Check if an inventory item was clicked
+            for cell_rect, row_idx, col_idx in self.option_rects:
+                if cell_rect.collidepoint(mouse_pos) and mouse_click == 1:
+                    self.on_select(row_idx, col_idx)
 
 class PauseMenu(Menu):
     def __init__(self, options: list):
@@ -816,6 +1311,9 @@ class PauseMenu(Menu):
             return "logout"
 
     def render(self, screen):
+        global volume
+        if volume > 10: # reduce volume in pause screen
+            volume = 10
         self.set_position(screen)
 
         # Create a transparent overlay
@@ -904,7 +1402,6 @@ class OptionMenu(Menu):
         if self.slider_rect.collidepoint(mouse_pos) and (mouse_click[0] or mouse_held[0]):
             relative_x = mouse_pos[0] - self.slider_rect.x
             volume = max(0, min(100, int((relative_x / self.slider_rect.width) * 100)))
-            print(volume)
 
         if self.toggle_rect.collidepoint(mouse_pos) and mouse_click[0]:
             fullscreen = not fullscreen
@@ -949,30 +1446,147 @@ class Gameplay(Scene):
         super().__init__(screen)
         self.paused = False
         self.in_options_menu = False
-        self.inventoryMenu = InventoryMenu(["Sword", "Shield", "Potion"])
-        self.pauseMenu = PauseMenu(["Resume", "Options", "Log Out"])  # Added "Options" button
-        self.optionMenu = OptionMenu()  # Create the OptionMenu
+        self.inventoryMenu = InventoryMenu(newClient)
+        self.pauseMenu = PauseMenu(["Resume", "Options", "Log Out"])
+        self.optionMenu = OptionMenu()
 
-    def handle_click(self, position):
-        if self.in_options_menu:
-            mouse_click = pygame.mouse.get_pressed()
+        # Scale factor for reducing the size of images (e.g., 0.5 to make the images smaller)
+        self.scale_factor = 2
+
+        # Dictionary to hold the loaded layers (farthest to closest)
+        self.background_layers = {}
+
+        # Load the background layers from 1.png to 10.png
+        self._load_background_layers()
+
+        # A list to hold the enemies on the client side
+        self.enemies = []
+
+    def _load_background_layers(self):
+        """Loads background layers from 1.png to 10.png and handles missing files."""
+        global sprites_folder
+        local_sprites_folder = f"{sprites_folder}\\Game\\backgrounds"
+
+        # Loop through 1 to 10 and load files if they exist
+        for i in range(1, 11):
+            try:
+                filepath = os.path.join(local_sprites_folder, f"{i}.png")
+                image = pygame.image.load(filepath).convert_alpha()  # Load with transparency
+                image = self._scale_image_to_screen(image)  # Scale image to screen size
+                self.background_layers[i] = {
+                    'image': image,
+                    'width': image.get_width()
+                }
+            except FileNotFoundError:
+                print(f"File {i}.png not found, skipping.")
+                continue
+
+    def _scale_image_to_screen(self, image):
+        """Helper method to scale an image to fit the entire screen size."""
+        return pygame.transform.scale(image, (SCREEN_WIDTH * self.scale_factor, SCREEN_HEIGHT * self.scale_factor))
+
+    def parallax_render(self, screen, player_position):
+        """Renders the parallax scrolling background based on player's position."""
+        # Define the parallax speed for each layer (closer layers move faster)
+        parallax_speeds = {
+            1: 0.1,  # Farthest layer (1.png)
+            2: 0.2,
+            3: 0.3,
+            4: 0.4,
+            5: 0.5,
+            6: 0.6,
+            7: 0.7,
+            8: 0.8,
+            9: 0.9,
+            10: 1.0  # Closest layer (10.png)
+        }
+
+        # Render each layer with appropriate parallax speed
+        for i in range(1, 11):
+            if i in self.background_layers:
+                layer = self.background_layers[i]['image']
+                layer_width = self.background_layers[i]['width']
+                parallax_speed = parallax_speeds.get(i, 1.0)
+                offset = player_position.x * parallax_speed % layer_width
+                self._render_layer(screen, layer, offset, layer_width, vertical_multiplier=(i * 0.1))
+
+    def _render_layer(self, screen, layer, offset, layer_width, vertical_multiplier):
+        """Helper method to render a background layer with a vertical offset based on depth."""
+        vertical_offset = int(SCREEN_HEIGHT // 2 * vertical_multiplier)
+
+        # Draw the layer twice to ensure continuous scrolling, with vertical adjustment
+        screen.blit(layer, (-offset, -vertical_offset))  # Draw the layer starting at -offset and shifted up
+        screen.blit(layer, (layer_width - offset, -vertical_offset))  # Draw the layer again to fill the gap
+
+    def handle_click(self, position, mouse_side):
+        mouse_click = pygame.mouse.get_pressed()
+        if not self.in_options_menu and not self.paused:
+            self.inventoryMenu.handle_mouse_input(position, mouse_side)
+
+            # Check if the player just equipped a weapon
+            if newClient.just_equipped:
+                # Reset the flag and ignore this click for activating the weapon
+                newClient.just_equipped = False
+                return
+            
+            if newClient.current_weapon:
+                newClient.activate_weapon()
+
+        elif self.in_options_menu:
             mouse_pos = pygame.mouse.get_pos()
             self.optionMenu.handle_mouse_input(mouse_pos, mouse_click, mouse_click)
+
         elif self.paused:
             selected_option = self.pauseMenu.handle_mouse_input(position, pygame.mouse.get_pressed())
-            if selected_option == "resume":
+            if selected_option == "resume" and mouse_click[0]:
                 self.paused = False
-            elif selected_option == "options":
+            elif selected_option == "options" and mouse_click[0]:
                 self.in_options_menu = True
-            elif selected_option == "logout":
+            elif selected_option == "logout" and mouse_click[0]:
                 newClient.logout()
                 global current_scene
                 current_scene = MainMenu(self.screen)
                 return
 
+    def render_enemies(self):
+        """Renders the enemies based on server data."""
+        # Get enemy data from the server
+        if newClient.server_data and newClient.server_data.enemy_data:
+            # Clear existing enemies and update with server data
+            self.enemies.clear()
+            for id, enemy_data in newClient.server_data.enemy_data.items():
+                if id in newClient.already_hit:
+                    continue
+                # Create an Enemy instance based on the server data
+                realpos = CalculateScreenPosition(enemy_data['position'], newClient.position)
+                enemy = Enemy(
+                    position=pygame.Vector2(realpos.x, realpos.y),
+                    health=enemy_data['health'],
+                    is_server=False
+                )
+                enemy.current_frame_index = enemy_data['animation_frame']  # Set the correct frame
+                enemy.current_animation = enemy_data['current_animation']
+                # Load the appropriate animation based on the current state
+                enemy.load_animation(enemy.current_animation)
+                enemy.last_frame_time = pygame.time.get_ticks()
+                enemy.frame_delay = 100
+                
+                self.enemies.append(enemy)
+
+        # Render each enemy on the screen
+        for enemy in self.enemies:
+            try:
+                enemy.render(self.screen)
+            except:
+                pygame.draw.rect(screen, RED, pygame.Rect(realpos.x, realpos.y, 128, 128))
+
     def render(self):
         global running
         global dt
+        global current_music
+
+        pygame.mixer.music.stop()
+        current_music = ""
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -983,19 +1597,27 @@ class Gameplay(Scene):
                     self.in_options_menu = False  # Exit options menu
                 else:
                     self.paused = not self.paused  # Toggle pause
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_x:
+                debugger.toggle_debug()
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                self.handle_click(event.pos)
+                self.handle_click(event.pos, event.button)
 
         # Game rendering logic
-        self.screen.fill(LIGHT_BLUE)
+        self.parallax_render(screen, newClient.position)
 
         if self.paused:
             newClient.movement_disabled = True
         else:
             newClient.movement_disabled = False
 
+        # Update the player
         newClient.update(self.screen, dt)
+
+        # Display debug information
         debugger.display_debug_info(self.screen, newClient.connectionInfo(), newClient=newClient)
+
+        # Render enemies from server data
+        self.render_enemies()
 
         if not self.paused and not self.in_options_menu:
             self.inventoryMenu.render(self.screen)
@@ -1139,7 +1761,7 @@ class ServerSelect(Scene):
             if event.type == pygame.QUIT:
                 running = False
                 return
-            elif event.type == pygame.MOUSEBUTTONDOWN:
+            elif event.type == pygame.MOUSEBUTTONDOWN and pygame.mouse.get_pressed()[0]:
                 self.handle_click(event.pos)
             elif event.type == pygame.KEYDOWN and self.active_input:
                 if event.key == pygame.K_BACKSPACE:
@@ -1183,6 +1805,7 @@ class ServerSelect(Scene):
                 pygame.draw.rect(screen, server_color, server_rect, border_radius=10)
                 server_name = server.split("\n")[0]
                 self.draw_text_with_shadow(screen, server_name, self.font, self.text_color, shadow_color, server_rect.center)
+
 class OptionsScene(Scene):
     def __init__(self, screen):
         super().__init__(screen)
@@ -1241,7 +1864,7 @@ class OptionsScene(Scene):
             if event.type == pygame.QUIT:
                 running = False
                 return
-            elif event.type == pygame.MOUSEBUTTONDOWN:
+            elif event.type == pygame.MOUSEBUTTONDOWN and pygame.mouse.get_pressed()[0]:
                 if self.volume_rect.collidepoint(event.pos):
                     relative_x = event.pos[0] - self.volume_rect.x
                     volume = max(0, min(100, int((relative_x / self.volume_rect.width) * 100)))
@@ -1363,7 +1986,7 @@ class MainMenu(Scene):
             if event.type == pygame.QUIT:
                 running = False
                 return
-            elif event.type == pygame.MOUSEBUTTONDOWN:
+            elif event.type == pygame.MOUSEBUTTONDOWN and pygame.mouse.get_pressed()[0]:
                 if server_select_rect.collidepoint(event.pos):
                     current_scene = ServerSelect(screen)
                     return
@@ -1384,7 +2007,6 @@ class MainMenu(Scene):
         self.draw_button(screen, server_select_rect, "Join a Server", server_select_rect.collidepoint(mouse_pos))
         self.draw_button(screen, options_rect, "Options", options_rect.collidepoint(mouse_pos))
         self.draw_button(screen, exit_rect, "Exit", exit_rect.collidepoint(mouse_pos))
-
 
 current_scene = MainMenu(screen)
 

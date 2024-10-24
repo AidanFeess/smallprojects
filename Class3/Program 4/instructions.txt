@@ -1,0 +1,8 @@
+Unfortunately, I was ultimately unable to add all the aspects I was hoping to add.
+However, the game is at least playable in the sense of being able to jump and run around
+and attack enemies.
+
+Step 1) Host a game by running Server.py
+Step 2) Run a client on the same computer or a computer on the same network by running Client.py
+Step 3) Click join a server and join the server you're hosting.
+Step 4) You're in
